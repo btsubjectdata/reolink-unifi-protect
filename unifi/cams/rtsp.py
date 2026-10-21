@@ -418,6 +418,21 @@ class RTSPCam(UnifiCamBase):
             await self.trigger_motion_stop()
             self._ai_active_lead = None
 
+    async def _image_size(self, path: Path) -> tuple[int, int]:
+        """(width, height) of an image via ffprobe, or (0, 0) if unknown."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height", "-of", "csv=p=0",
+                str(path),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            w, h = out.decode().strip().split(",")[:2]
+            return int(w), int(h)
+        except Exception:
+            return 0, 0
+
     async def _make_object_crop(self, tracker_id: int, kind: str, coord: list) -> None:
         """Square crop around one detection, from a fresh camera snapshot.
 
@@ -439,8 +454,15 @@ class RTSPCam(UnifiCamBase):
                 src = snap
             ts_ms = int(round(time.time() * 1000))
 
-            fw = int(getattr(self.args, "hi_width", 0) or 1920)
-            fh = int(getattr(self.args, "hi_height", 0) or 1080)
+            # Measure the snapshot instead of assuming main-stream size: with
+            # --snapshot-tee it comes from the sub stream (e.g. 1280x720 vs a
+            # 2560x1440 main stream) and a crop computed for the wrong size
+            # falls outside the image, so ffmpeg fails and the event gets no
+            # thumbnail.
+            fw, fh = await self._image_size(src)
+            if not fw or not fh:
+                fw = int(getattr(self.args, "hi_width", 0) or 1920)
+                fh = int(getattr(self.args, "hi_height", 0) or 1080)
             x, y, w, h = (float(c) for c in coord)
             box_w, box_h = w * fw / 1000, h * fh / 1000
             cx, cy = (x + w / 2) * fw / 1000, (y + h / 2) * fh / 1000
