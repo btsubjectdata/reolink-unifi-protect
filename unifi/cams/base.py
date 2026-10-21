@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import atexit
-import datetime
 import json
 import logging
 import os
@@ -15,6 +14,7 @@ import tempfile
 import time
 import urllib
 from abc import ABCMeta, abstractmethod
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
@@ -26,6 +26,29 @@ import websockets
 from unifi.core import RetryableError
 
 AVClientRequest = AVClientResponse = dict[str, Any]
+
+
+def jpeg_size(path: Path) -> Optional[tuple[int, int]]:
+    """(width, height) from a JPEG's start-of-frame marker, or None if unreadable."""
+    try:
+        data = path.read_bytes()[:65536]
+    except OSError:
+        return None
+    i = 2
+    while i + 9 < len(data):
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker == 0xFF:
+            i += 1
+            continue
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height = int.from_bytes(data[i + 5 : i + 7], "big")
+            width = int.from_bytes(data[i + 7 : i + 9], "big")
+            return (width, height) if width and height else None
+        i += 2 + int.from_bytes(data[i + 2 : i + 4], "big")
+    return None
 
 
 class SmartDetectObjectType(Enum):
@@ -61,6 +84,9 @@ class UnifiCamBase(metaclass=ABCMeta):
         self.smart_detect_enabled: Optional[set] = None
         self.smart_detect_zones: Optional[dict] = None
         self.smart_exclude_zones: Optional[dict] = None
+        # Must stay small: Protect's ds daemon parses trackerID as a u32, and
+        # trackerID is derived from this id (see trigger_motion_start). Seeding
+        # it from the epoch overflowed that field and every event was dropped.
         self._motion_event_id: int = 0
         self._motion_event_ts: Optional[float] = None
         self._motion_object_type: Optional[SmartDetectObjectType] = None
@@ -231,6 +257,26 @@ class UnifiCamBase(metaclass=ABCMeta):
     async def change_video_settings(self, options) -> None:
         return
 
+    async def reboot_camera(self) -> None:
+        """Called when Protect asks the camera to reboot; override to act."""
+        return
+
+    async def continuous_move(self, x: int, y: int, z: int) -> None:
+        """Called on each Protect PTZ joystick/zoom tick; override to act."""
+        return
+
+    async def ptz_position(self) -> Optional[dict[str, Any]]:
+        """Reply payload for GetCurrentPosition, or None to just echo the request."""
+        return None
+
+    async def spotlight(self, duration_s: int) -> None:
+        """Called for Protect's TurnOnColorNightVision (light on for duration_s)."""
+        return
+
+    async def ptz_preset(self, payload: dict[str, Any]) -> None:
+        """Called for Protect's Preset/Home messages (home view is slot -1)."""
+        return
+
     @abstractmethod
     async def get_snapshot(self) -> Path:
         raise NotImplementedError("You need to write this!")
@@ -328,7 +374,7 @@ class UnifiCamBase(metaclass=ABCMeta):
         codecs = ["h264"]
         if getattr(self.args, "hi_codec", "h264") == "h265":
             codecs.append("h265")
-        return {
+        flags = {
             "mic": 1,
             "aec": [],
             "videoMode": ["default"],
@@ -348,7 +394,7 @@ class UnifiCamBase(metaclass=ABCMeta):
             "hasHdr": False,
             "hasWdr": True,
             "hasMic": True,
-            "hasSpeaker": False,
+            "hasSpeaker": bool(getattr(self.args, "speaker", False)),
             "hasInfrared": False,
             "hasMotionZones": True,
             "hasPrivacyMask": False,
@@ -361,6 +407,103 @@ class UnifiCamBase(metaclass=ABCMeta):
             "maxScaleDownLevel": 2,
             "downScaleResolutions": [[3840, 2160], [2688, 1512], [1920, 1080]],
         }
+        if getattr(self.args, "doorbell", False):
+            # Protect shows doorbell UI off featureFlags.doorbell
+            flags["doorbell"] = True
+        if getattr(self.args, "ptz", False):
+            # Protect derives isPtz from the short `ptz` key (like `speaker`)
+            flags["ptz"] = True
+            flags["isPtz"] = True
+        if getattr(self.args, "speaker", False):
+            # Protect maps hasSpeaker from the camera's short `speaker` key
+            flags["speaker"] = True
+        if getattr(self.args, "spotlight", False):
+            # Protect maps hasFlash/flashRange from `flash`/`flashRange` and then
+            # offers its light action (it sends TurnOnColorNightVision)
+            flags["flash"] = True
+            flags["hasFlash"] = True
+            flags["flashRange"] = 10
+        return flags
+
+    async def _protect_login(self, session: "aiohttp.ClientSession") -> Optional[str]:
+        base = f"https://{self.args.host}"
+        async with session.post(
+            f"{base}/api/auth/login",
+            headers={"Origin": base, "Referer": base + "/"},
+            json={
+                "username": self.args.protect_ring_user,
+                "password": self.args.protect_ring_password,
+                "rememberMe": False,
+            },
+            ssl=False,
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"Protect login failed: HTTP {resp.status}")
+            return resp.headers.get("X-CSRF-Token") or resp.headers.get(
+                "X-Updated-CSRF-Token"
+            )
+
+    async def trigger_ring(self) -> None:
+        # Protect has no camera->NVR ring message; a real ring (push, call
+        # screen, thumbnail, chip) comes from the Access doorbell endpoint,
+        # which needs a normal login session (an Integration API key gets 401).
+        self.logger.info("Doorbell button press detected")
+        user = getattr(self.args, "protect_ring_user", None)
+        if not user or not getattr(self.args, "protect_ring_password", None):
+            self.logger.info("No --protect-ring-user/password; not ringing Protect")
+            return
+        now = time.time()
+        if now - getattr(self, "_last_ring_ts", 0) < 10:
+            return
+        self._last_ring_ts = now
+        base = f"https://{self.args.host}"
+        mac = self.args.mac.replace(":", "").upper()
+        jar = aiohttp.CookieJar(unsafe=True)
+        try:
+            async with aiohttp.ClientSession(cookie_jar=jar) as session:
+                for attempt in (1, 2):
+                    csrf = await self._protect_login(session)
+                    headers = {"Origin": base, "Referer": base + "/"}
+                    if csrf:
+                        headers["X-CSRF-Token"] = csrf
+                    async with session.get(
+                        f"{base}/proxy/protect/api/cameras",
+                        headers=headers,
+                        ssl=False,
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        cams = await resp.json(content_type=None)
+                    cam = next(
+                        (
+                            c
+                            for c in cams
+                            if str(c.get("mac", "")).replace(":", "").upper() == mac
+                        ),
+                        None,
+                    )
+                    if not cam:
+                        self.logger.warning(f"Camera {mac} not found in Protect")
+                        return
+                    start = int(now * 1000)
+                    async with session.post(
+                        f"{base}/proxy/protect/api/events/access/action",
+                        headers=headers,
+                        json={
+                            "action": "door_bell",
+                            "camera_id": cam["id"],
+                            "start_time": start,
+                            "end_time": start + 3000,
+                        },
+                        ssl=False,
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status in (401, 403) and attempt == 1:
+                            continue
+                        self.logger.info(f"Rang Protect: HTTP {resp.status}")
+                        return
+        except Exception as e:
+            self.logger.warning(f"Ringing Protect failed: {e}")
 
     # API for subclasses
     async def trigger_motion_start(
@@ -400,9 +543,9 @@ class UnifiCamBase(metaclass=ABCMeta):
                     descriptors = [
                         self.build_smart_descriptor(
                             object_type.value,
-                            [250, 250, 500, 500],
+                            self.SYNTHETIC_BOX,
                             0.9,
-                            (self._motion_event_id + 1) * 100,
+                            self.synthetic_tracker_id(),
                         )
                     ]
                 payload.update(
@@ -413,12 +556,13 @@ class UnifiCamBase(metaclass=ABCMeta):
                         # status label — a bare number fails the whole
                         # AJV message.
                         "zonesStatus": {
-                            str(z): {"status": "enter"}
+                            str(z): {"level": self.SMART_ZONE_LEVEL, "status": "enter"}
                             for d in descriptors
                             for z in d["zones"]
                         }
-                        or {"1": {"status": "enter"}},
+                        or {"1": {"level": self.SMART_ZONE_LEVEL, "status": "enter"}},
                         "smartDetectSnapshot": "",
+                        **self.EMPTY_SNAPSHOT_FIELDS,
                         # Protect 7.x validates this against its
                         # smartDetectObjectsTransformMessage schema and
                         # derives the event's smartDetectTypes ONLY from
@@ -441,9 +585,9 @@ class UnifiCamBase(metaclass=ABCMeta):
                 else ""
             )
             await self.send(
-                self.gen_response(
+                self.gen_event(
                     "EventSmartDetect" if object_type else "EventAnalytics",
-                    payload=payload,
+                    payload,
                 ),
             )
             self._motion_event_ts = start_ts
@@ -468,6 +612,30 @@ class UnifiCamBase(metaclass=ABCMeta):
     # stale positions behind moving subjects.
     SMART_DISPLAY_TIMEOUT_MS = 600
 
+    # ds requires a `level` next to `status` in every zonesStatus entry (real
+    # cameras send 0-100, ~65-90 while something is in the zone); without it
+    # the frame fails ds's typed parse and is relayed to Protect, which
+    # rejects it as "not expected over avclient".
+    SMART_ZONE_LEVEL = 80
+
+    # Centred box (Protect's 0-1000 [x, y, w, h] space) used when a detection
+    # has no coordinates of its own, e.g. the camera's push events.
+    SYNTHETIC_BOX = [250, 250, 500, 500]
+
+    def synthetic_tracker_id(self) -> int:
+        return (self._motion_event_id + 1) * 100
+
+    # Present (empty) on every real enter/moving frame; the leave frame fills them in.
+    EMPTY_SNAPSHOT_FIELDS: dict[str, Any] = {
+        "smartDetectSnapshotFullFoV": "",
+        "smartDetectSnapshotFullFoVHeight": 0,
+        "smartDetectSnapshotFullFoVWidth": 0,
+        "smartDetectSnapshots": [],
+    }
+
+    # Colours the real cameras draw each class in.
+    BOX_COLORS = {"person": "red", "vehicle": "cyan", "animal": "white"}
+
     def build_smart_descriptor(
         self,
         object_type: str,
@@ -477,13 +645,17 @@ class UnifiCamBase(metaclass=ABCMeta):
         zones: Optional[list] = None,
     ) -> dict[str, Any]:
         # Shape per Protect 7.x's smartDetectObjectsTransformMessage
-        # schema; coord is 0-1000 [x, y, w, h]. tracker_id must be
+        # schema, field for field what a real G5's frames carry (read from ds's
+        # payloads.jsonl); coord is 0-1000 [x, y, w, h]. tracker_id must be
         # STABLE per physical object across reports or the UI stacks a
         # new box per update instead of moving one.
         first_seen = getattr(self, "_ds_first_seen", None)
         if first_seen is None:
             first_seen = self._ds_first_seen = {}
+        if len(first_seen) > 256:
+            first_seen.clear()
         now_ms = int(round(time.time() * 1000))
+        # --event-lead: the subject was first seen before its event reached us
         lead_ms = int(max(0.0, float(getattr(self.args, "event_lead", 0) or 0)) * 1000)
         shown_ms = first_seen.setdefault(int(tracker_id), now_ms - lead_ms)
         return {
@@ -513,7 +685,7 @@ class UnifiCamBase(metaclass=ABCMeta):
             "matchedId": None,
             # remaining fields of ds's CameraSmartDetectDescriptor, as a real
             # G4/G5 sends them (traced on Protect 7.3.70)
-            "boxColor": {"person": "red", "vehicle": "cyan"}.get(object_type, "yellow"),
+            "boxColor": self.BOX_COLORS.get(object_type, "yellow"),
             "tag": "",
             "associatedFaceTrackerID": None,
             "faceEmbed": None,
@@ -563,14 +735,17 @@ class UnifiCamBase(metaclass=ABCMeta):
             "eventType": "motion",
             "objectTypes": sorted({d["objectType"] for d in descriptors}),
             "zonesStatus": {
-                str(z): {"status": "moving"} for d in descriptors for z in d["zones"]
+                str(z): {"level": self.SMART_ZONE_LEVEL, "status": "moving"}
+                for d in descriptors
+                for z in d["zones"]
             }
-            or {"1": {"status": "moving"}},
+            or {"1": {"level": self.SMART_ZONE_LEVEL, "status": "moving"}},
             "displayTimeoutMSec": self.SMART_DISPLAY_TIMEOUT_MS,
             "descriptors": descriptors,
+            **self.EMPTY_SNAPSHOT_FIELDS,
         }
         self._ds_payload_fill(payload)
-        await self.send(self.gen_response("EventSmartDetect", payload=payload))
+        await self.send(self.gen_event("EventSmartDetect", payload))
 
     async def trigger_motion_stop(self) -> None:
         motion_start_ts = self._motion_event_ts
@@ -595,16 +770,23 @@ class UnifiCamBase(metaclass=ABCMeta):
                     {
                         "objectTypes": [motion_object_type.value],
                         "edgeType": "leave",
-                        "zonesStatus": {"1": {"status": "leave"}},
+                        "zonesStatus": {
+                            "1": {"level": self.SMART_ZONE_LEVEL, "status": "leave"}
+                        },
                         "smartDetectSnapshot": "motionsnap.jpg",
                         "displayTimeoutMSec": self.SMART_DISPLAY_TIMEOUT_MS,
                         "descriptors": [],
                     }
                 )
+                payload.update(self._stage_full_fov())
                 if self._smart_snapshots:
                     payload["smartDetectSnapshots"] = list(self._smart_snapshots)
                     payload["trackerIDAttrMap"] = {
-                        str(entry["trackerID"]): {} for entry in self._smart_snapshots
+                        str(entry["trackerID"]): {
+                            "objectType": entry["smartDetectSnapshotType"],
+                            "zone": [1],
+                        }
+                        for entry in self._smart_snapshots
                     }
                     self.logger.info(
                         "Announcing object crops: "
@@ -624,9 +806,9 @@ class UnifiCamBase(metaclass=ABCMeta):
                 else ""
             )
             await self.send(
-                self.gen_response(
+                self.gen_event(
                     "EventSmartDetect" if motion_object_type else "EventAnalytics",
-                    payload=payload,
+                    payload,
                 ),
             )
             self._motion_event_id += 1
@@ -648,6 +830,32 @@ class UnifiCamBase(metaclass=ABCMeta):
     # this only needs to outlive a slow NVR, not a long event: crops
     # belonging to the event still in progress are never pruned.
     CROP_RETENTION_SEC = 600
+
+    def _stage_full_fov(self) -> dict[str, Any]:
+        """Announce the event's full frame like real cameras do.
+
+        Their leave frame names a full-field-of-view jpeg plus its size; ds then
+        asks for it and stores thumbnailFullfovId. Without it only the per-object
+        crop exists and the event card has no wide view.
+        """
+        src = self._motion_snapshot
+        if not src or not src.exists():
+            return {}
+        fname = f"fullfov_{self._motion_event_id}.jpg"
+        # Same pruned directory as the per-object crops, not the temp root.
+        dst = Path(getattr(self, "snapshot_dir", None) or src.parent, fname)
+        try:
+            shutil.copyfile(src, dst)
+        except OSError:
+            return {}
+        self._smart_snapshot_files[fname] = dst
+        self.prune_stale_crops()
+        width, height = jpeg_size(dst) or (0, 0)
+        return {
+            "smartDetectSnapshotFullFoV": fname,
+            "smartDetectSnapshotFullFoVHeight": height,
+            "smartDetectSnapshotFullFoVWidth": width,
+        }
 
     def prune_stale_crops(self) -> None:
         cutoff = time.time() - self.CROP_RETENTION_SEC
@@ -741,7 +949,7 @@ class UnifiCamBase(metaclass=ABCMeta):
                     "lensmodel": self.args.model,
                     "cameraName": self.args.name,
                     "isGen5s": True,
-                    "isDoorbellSeries": False,
+                    "isDoorbellSeries": bool(getattr(self.args, "doorbell", False)),
                 }
             )
         await self.send(self.gen_response("ubnt_avclient_hello", payload=payload))
@@ -1410,6 +1618,15 @@ class UnifiCamBase(metaclass=ABCMeta):
             path = self._motion_snapshot
         else:
             path = await self.get_snapshot()
+            # The capture process this starts (or restarts) takes a moment to produce
+            # its first frame. A request landing right after adoption/reconnect, before
+            # that frame exists, used to fail outright with no retry; wait briefly for it
+            # instead, bounded well under Protect's own request timeout.
+            if path and not path.exists():
+                for _ in range(25):  # ~5s at 0.2s steps
+                    await asyncio.sleep(0.2)
+                    if path.exists():
+                        break
 
         if path and path.exists():
             async with aiohttp.ClientSession() as session:
@@ -1446,6 +1663,11 @@ class UnifiCamBase(metaclass=ABCMeta):
             },
         )
 
+    def gen_event(self, name: str, payload: dict[str, Any]) -> AVClientResponse:
+        """Event envelope. gen_response already carries the statusCode /
+        timeStamp ds requires (traced from a real G4/G5: "+00:00" form)."""
+        return self.gen_response(name, payload=payload)
+
     def gen_response(
         self, name: str, response_to: int = 0, payload: Optional[dict[str, Any]] = None
     ) -> AVClientResponse:
@@ -1453,7 +1675,7 @@ class UnifiCamBase(metaclass=ABCMeta):
             payload = {}
         # statusCode/timeStamp: required by Protect 7.x's Device Service
         # (ds) to parse the envelope at all; see patches/apply_envelope.py
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.now(timezone.utc)
         return {
             "from": "ubnt_avclient",
             "functionName": name,
@@ -1491,6 +1713,10 @@ class UnifiCamBase(metaclass=ABCMeta):
                 "UpdateFirmwareRequest",
                 "Reboot",
                 "ubnt_avclient_hello",
+                "ContinuousMove",
+                "Preset",
+                "Home",
+                "TurnOnColorNightVision",
             ]
         ):
             return False
@@ -1515,6 +1741,8 @@ class UnifiCamBase(metaclass=ABCMeta):
             res = await self.process_network_status(m)
         elif fn == "AnalyticsTest":
             res = self.gen_response("AnalyticsTest", response_to=m["messageId"])
+        elif fn == "ChangeTalkbackSettings":
+            res = await self.process_talkback_settings(m)
         elif fn == "ChangeSoundLedSettings":
             res = await self.process_sound_led_settings(m)
         elif fn == "ChangeIspSettings":
@@ -1533,7 +1761,26 @@ class UnifiCamBase(metaclass=ABCMeta):
             await self.process_upgrade(m)
             return True
         elif fn == "Reboot":
+            await self.reboot_camera()
             return True
+        elif fn == "ContinuousMove":
+            payload = m.get("payload") or {}
+            await self.continuous_move(
+                payload.get("x", 0), payload.get("y", 0), payload.get("z", 0)
+            )
+        elif fn == "GetCurrentPosition":
+            position = await self.ptz_position()
+            if position is not None:
+                res = self.gen_response(
+                    fn, response_to=m["messageId"], payload=position
+                )
+        elif fn == "TurnOnColorNightVision":
+            payload = m.get("payload") or {}
+            self.logger.info(f"Spotlight request: {json.dumps(payload)}")
+            await self.spotlight(int(payload.get("spotlightDuration") or 0))
+        elif fn in ("Preset", "Home"):
+            self.logger.info(f"PTZ {fn} message: {json.dumps(m.get('payload') or {})}")
+            await self.ptz_preset({"function": fn, **(m.get("payload") or {})})
 
         if res is None and m.get("responseExpected"):
             # Protect 7.x sends many settings requests (talkback, clarity
@@ -1549,6 +1796,61 @@ class UnifiCamBase(metaclass=ABCMeta):
             await self.send(res)
 
         return False
+
+    async def process_talkback_settings(self, m: dict[str, Any]) -> AVClientResponse:
+        payload = m.get("payload") or {}
+        self.logger.info(f"ChangeTalkbackSettings payload: {json.dumps(payload)}")
+        if getattr(self.args, "speaker", False):
+            port = int(payload.get("bindPort") or 7004)
+            await self._start_talkback_listener(port)
+        return self.gen_response(
+            "ChangeTalkbackSettings", response_to=m["messageId"], payload=payload
+        )
+
+    async def _start_talkback_listener(self, port: int) -> None:
+        if getattr(self, "_talkback_transport", None):
+            return
+        logger = self.logger
+        bridge = None
+        if getattr(self.args, "talkback_bridge", False) and getattr(
+            self.args, "reolink_ai_host", None
+        ):
+            from unifi.talkback import TalkbackBridge
+
+            bridge = TalkbackBridge(
+                f"rtsp://{self.args.reolink_ai_host}:554/h264Preview_01_main",
+                self.args.reolink_ai_user,
+                self.args.reolink_ai_password,
+                logger,
+            )
+            logger.info("Talkback bridge enabled (AAC -> G.711 -> ONVIF backchannel)")
+
+        class _Probe(asyncio.DatagramProtocol):
+            count = 0
+
+            def datagram_received(self, data: bytes, addr) -> None:
+                _Probe.count += 1
+                if bridge:
+                    bridge.feed(data)
+                if _Probe.count <= 20 or _Probe.count % 200 == 0:
+                    hdr = ""
+                    if len(data) >= 12:
+                        hdr = (
+                            f" rtp v={data[0] >> 6} pt={data[1] & 0x7F}"
+                            f" seq={int.from_bytes(data[2:4], 'big')}"
+                            f" ts={int.from_bytes(data[4:8], 'big')}"
+                            f" ssrc={int.from_bytes(data[8:12], 'big'):08x}"
+                        )
+                    logger.info(
+                        f"talkback udp #{_Probe.count} from {addr[0]}:{addr[1]}"
+                        f" len={len(data)}{hdr} head={data[:16].hex()}"
+                    )
+
+        loop = asyncio.get_running_loop()
+        self._talkback_transport, _ = await loop.create_datagram_endpoint(
+            _Probe, local_addr=("0.0.0.0", port)
+        )
+        self.logger.info(f"Talkback UDP listener on 0.0.0.0:{port}")
 
     def get_base_ffmpeg_args(self, stream_index: str = "") -> str:
         # No -use_wallclock_as_timestamps: stamping packets with network
