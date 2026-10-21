@@ -1,0 +1,69 @@
+# Reolink camera -> UniFi Protect on a small Intel box (N95/N100/N150 mini PC, any
+# Intel iGPU with Quick Sync). Full-featured path:
+#   video1        = the camera's native H.265 main stream, passed through untouched
+#   video2/video3 = the camera's H.264 sub stream, transcoded to H.265 on the iGPU
+#                   (Protect expects every channel in HEVC once enhanced encoding is on)
+#   smart detections with moving boxes from the camera's own AI (Baichuan, port 9000),
+#   push events, HTTPS snapshots, spotlight / reboot from Protect.
+#
+# Developed for a Reolink Elite Floodlight WiFi (5120x1552 @ 20 fps H.265, sub stream
+# H.264); the stream numbers come from .env so any Reolink works. See README.md.
+#
+# Secrets live ONLY in .env next to this file (gitignored). Copy .env.example.
+services:
+  proxy:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.vaapi
+    image: unifi-cam-proxy:vaapi
+    container_name: ${CAM_NAME:-reolink}-proxy
+    restart: unless-stopped
+    network_mode: host          # Protect sees the proxy's own IP; push/ONVIF callbacks work
+    devices:
+      - /dev/dri:/dev/dri       # the iGPU, for the sub-stream HEVC transcode
+    group_add:
+      - video
+      - render
+    volumes:
+      - ./client.pem:/client.pem:ro
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 536870912       # 512 MiB scratch for snapshots / crops
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      TZ: ${TZ:-America/Chicago}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        # First run: the proxy logs in to Protect and fetches its own adoption token.
+        # After the camera is adopted set ADOPTED=1 and it reconnects like a real camera.
+        if [ "$${ADOPTED:-0}" = "1" ]; then AUTH="--adopted --nvr-username $$NVR_USER --nvr-password $$NVR_PASS";
+        else AUTH="--nvr-username $$NVR_USER --nvr-password $$NVR_PASS"; fi
+        exec unifi-cam-proxy --host "$$NVR_IP" --cert /client.pem $$AUTH \
+          --mac "$$CAM_MAC" --ip "$$CAM_IP" --name "$$CAM_NAME" \
+          --model "$${MODEL:-UVC G5 Pro}" --sysid "$${SYSID:-0xa598}" --platform "$${PLATFORM:-sav837gw}" \
+          --fw-version "$$FW_VERSION" --fw-build "$${FW_BUILD:-92ebf37.260724.1639}" \
+          rtsp \
+          -s "rtsp://$$CAM_USER:$$CAM_PASS@$$CAM_IP:554/h264Preview_01_main" \
+             "rtsp://$$CAM_USER:$$CAM_PASS@$$CAM_IP:554/h264Preview_01_sub" \
+          --rtsp-transport tcp \
+          --ffmpeg-args "$${FFMPEG_ARGS:--c:v copy -c:a copy}" \
+          --hi-codec h265 --hi-width "$$HI_WIDTH" --hi-height "$$HI_HEIGHT" --hi-fps "$$HI_FPS" \
+          --lo-codec h265 --lo-h265-transcode --transcode-backend qsv \
+          --lo-width "$$LO_WIDTH" --lo-height "$$LO_HEIGHT" --lo-fps "$$LO_FPS" \
+          --snapshot-url "https://$$CAM_IP/cgi-bin/api.cgi?cmd=Snap&channel=0&rs=proxy&user=$$CAM_USER&password=$$CAM_PASS" \
+          --reolink-ai-host "$$CAM_IP" --reolink-ai-user "$$CAM_USER" --reolink-ai-password "$$CAM_PASS" \
+          --reolink-push-ai \
+          --ai-sidecar --ai-sidecar-profile "$${AI_SIDECAR_PROFILE:-sub}" \
+          --ai-min-confidence "$${AI_MIN_CONFIDENCE:-0.75}" \
+          --ai-confidence-overrides "$${AI_CONFIDENCE_OVERRIDES:-animal=0.6}" \
+          --ai-classes "$${AI_CLASSES:-person,vehicle,animal}" \
+          --thumbnail-crop object --thumbnail-delay "$${THUMBNAIL_DELAY:-1}" \
+          --event-lead "$${EVENT_LEAD:-1}" \
+          $${SPOTLIGHT:+--spotlight} $${REBOOT:+--reolink-reboot} $$EXTRA_ARGS

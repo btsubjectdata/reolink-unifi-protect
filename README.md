@@ -55,6 +55,10 @@ running natively on a **Mac** (no Docker):
   Intel Macs instead of Intel QSV.
 - **`--snapshot-tee`** — snapshots written by a live stream's ffmpeg, for cameras that cap
   RTSP sessions (Tapo allows two).
+- **`deploy/n100/`** — the Reolink full-quality path on a small Intel box (N95/N100/Core-U): 5K H.265
+  passthrough, sub stream to HEVC on Quick Sync, boxes + push events + spotlight, one container.
+  Written for a Reolink Elite Floodlight WiFi at a second site; `probe.sh` reads the camera's real
+  stream specs. *Prepared ahead of hardware — first real run pending.*
 - **Docker stack for ONVIF cameras** ([`deploy/onvif/`](deploy/onvif)) — proxy + ONVIF sidecar +
   mediamtx relay in one `docker compose up`, for any Docker host. *Untested so far* — same
   components as the Mac kit, but not yet run as containers; feedback welcome. The existing Reolink
