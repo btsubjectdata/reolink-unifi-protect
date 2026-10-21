@@ -373,7 +373,11 @@ async def run(args: argparse.Namespace) -> None:
             await serve_snapshots(args, ev, session)
         seen = set()
 
+        last_event = {"ts": time.time()}
+
         def handle(msgs):
+            if msgs:
+                last_event["ts"] = time.time()
             for m in msgs:
                 if args.dump:
                     log(f"EVENT topic={m['topic']} items={json.dumps(m['items'])}")
@@ -413,12 +417,29 @@ async def run(args: argparse.Namespace) -> None:
                 try:
                     await ev.connect_push(consumer)
                     backoff = 2
+                    last_event["ts"] = subscribed_at = time.time()
                     while True:
                         await asyncio.sleep(60)
                         if args.dump and time.time() - started > args.dump:
                             log("dump finished")
                             await ev.unsubscribe()
                             return
+                        # A rebooted Tapo forgets its subscriptions but still answers
+                        # Renew, so a quiet camera looks like a live one. Re-create the
+                        # subscription when nothing has arrived for a while (a Tapo sends
+                        # motion on/off notifications regularly) and on a fixed cadence.
+                        quiet = time.time() - last_event["ts"]
+                        age = time.time() - subscribed_at
+                        if (
+                            quiet > args.resubscribe_quiet
+                            or age > args.resubscribe_every
+                        ):
+                            log(
+                                f"re-creating subscription ({int(quiet)}s without a"
+                                f" notification, {int(age)}s old)"
+                            )
+                            await ev.unsubscribe()
+                            break
                         await ev.renew()
                 except asyncio.CancelledError:
                     await ev.unsubscribe()
@@ -594,6 +615,18 @@ def main() -> None:
     p.add_argument("--sink", default="http://127.0.0.1:7999/detections")
     p.add_argument(
         "--interval", type=float, default=0.4, help="seconds between sink posts"
+    )
+    p.add_argument(
+        "--resubscribe-quiet",
+        type=float,
+        default=300,
+        help="re-create the push subscription after this many seconds without any notification (a rebooted camera forgets it but still answers Renew)",
+    )
+    p.add_argument(
+        "--resubscribe-every",
+        type=float,
+        default=1800,
+        help="re-create the push subscription at least this often (seconds)",
     )
     p.add_argument(
         "--hold",
