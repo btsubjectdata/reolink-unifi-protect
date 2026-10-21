@@ -210,14 +210,6 @@ class UnifiCamBase(metaclass=ABCMeta):
             help="Stream whose ffmpeg writes --snapshot-tee (video1/video2/video3)",
         )
         parser.add_argument(
-            "--snapshot-tee-keyframes",
-            action="store_true",
-            help="Decode only keyframes for --snapshot-tee (-skip_frame nokey):"
-            " a few percent of CPU instead of a full decode of the tee stream,"
-            " at the cost of the JPEG refreshing once per GOP (typically 1-4 s)"
-            " instead of once a second. For small hosts such as a Raspberry Pi",
-        )
-        parser.add_argument(
             "--event-lead",
             default=0.0,
             type=float,
@@ -1923,9 +1915,9 @@ class UnifiCamBase(metaclass=ABCMeta):
                     f' -map 0:v:0 -r 1 -update 1 -q:v 4 -f image2'
                     f' "{self.args.snapshot_tee}"'
                 )
-                if getattr(self.args, "snapshot_tee_keyframes", False):
-                    # the copy output never decodes, so this only throttles the tee
-                    tee_in = " -skip_frame nokey"
+                # NB: no -skip_frame nokey here: ffmpeg applies it to the stream's
+                # packets too, so the copied output loses its non-keyframes and
+                # Protect hangs the stream up. The decode is cheap at sub-stream size.
             cmd = (
                 "ffmpeg -nostdin -loglevel error -y"
                 f" {self.get_base_ffmpeg_args(stream_index)}{tee_in} -rtsp_transport"

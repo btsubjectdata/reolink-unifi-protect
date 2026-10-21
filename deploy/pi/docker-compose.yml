@@ -3,8 +3,6 @@
 # with its own ports. Same three services as deploy/onvif (relay / proxy / sidecar); differences:
 #   - Dockerfile here: Debian + prebuilt wheels, builds on arm64 without a toolchain
 #   - scratch (the once-a-second snapshot JPEG, crops) lives on /dev/shm, never on the SD card
-#   - SNAPSHOT_TEE_KEYFRAMES=1 decodes only keyframes for the snapshot (a Pi 4 can afford the
-#     full decode for two 720p sub streams, but this keeps it cool)
 services:
   relay:
     image: bluenviron/mediamtx:1.21.2
@@ -55,7 +53,6 @@ services:
           --lo-codec "$${LO_CODEC:-h264}" --lo-width "$${LO_WIDTH:-1280}" --lo-height "$${LO_HEIGHT:-720}" --lo-fps "$${LO_FPS:-15}" \
           --snapshot-url "http://127.0.0.1:$${SNAPSHOT_PORT:-8999}/snapshot.jpg" \
           --snapshot-tee /snapshots/cam.jpg --snapshot-tee-stream video3 \
-          $${SNAPSHOT_TEE_KEYFRAMES:+--snapshot-tee-keyframes} \
           --ai-sink-port "$${AI_SINK_PORT:-7999}" --ai-min-movement 0 \
           --ai-min-confidence "$${AI_MIN_CONFIDENCE:-0.5}" --ai-classes "$${AI_CLASSES:-person,vehicle,animal}" \
           --thumbnail-crop "$${THUMBNAIL_CROP:-motion}" --thumbnail-delay "$${THUMBNAIL_DELAY:-5}" \

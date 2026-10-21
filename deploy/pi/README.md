@@ -13,7 +13,6 @@ sidecar), plus:
   own project with its own ports
 - **nothing is written to the SD card** while running: the once-a-second snapshot JPEG and the
   event crops live in RAM (`/dev/shm`), container logs are capped at 10 MB
-- `SNAPSHOT_TEE_KEYFRAMES=1` — the snapshot decodes keyframes only, a few percent of CPU
 - a Debian image that builds on arm64 with no toolchain (a few minutes on a Pi 4)
 - `import-mac-config.sh` — moves the macOS kit's configuration over, keeping `CAM_MAC` so Protect
   keeps the cameras and their history
@@ -84,8 +83,8 @@ Everything the macOS kit has, per camera file: `FFMPEG_ARGS` (16 kHz audio for S
 `ONVIF_HOLD` / `AI_CLEAR_AFTER` (clip tail). See
 [`deploy/macos/README.md`](../macos/README.md#event-thumbnails-and-clip-timing-onvif-cameras).
 
-If the Pi runs hot: `SNAPSHOT_TEE_KEYFRAMES=1` is already on; lowering the cameras' sub stream
-to 15 fps and 1 Mbps helps; the main stream is never decoded.
+If the Pi runs hot: lowering the cameras' sub stream to 15 fps and 1 Mbps helps (it is the only
+stream that is decoded, for the once-a-second snapshot); the main stream is never decoded.
 
 ## After a Protect update
 

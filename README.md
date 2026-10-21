@@ -216,7 +216,6 @@ The full, generated list is in [docs/FLAGS.md](docs/FLAGS.md); the main ones are
 | `--reolink-visitor-poll` | Fallback: poll `GetEvents` for the button instead of using push |
 | `--ai-sidecar`, `--ai-sidecar-profile`, `--ai-sidecar-always-on` | Run the bundled Baichuan box sidecar: events carry the camera's real moving detection boxes and per-object crops. On-demand by default (stream open only during detections). See [docs/PROTECT-7.3.md](docs/PROTECT-7.3.md) |
 | `--snapshot-url` | Snapshot via the camera's HTTP(S) API instead of a fourth RTSP session (Reolink WiFi cameras limit concurrent RTSP) |
-| `--snapshot-tee-keyframes` | (this fork) decode keyframes only for the tee: a few percent of CPU on a Pi, JPEG refreshes once per GOP |
 | `--snapshot-tee PATH`, `--snapshot-tee-stream` | (this fork) JPEG written once a second by a live stream's ffmpeg, for cameras that cap RTSP sessions |
 | `--transcode-backend {qsv,videotoolbox}` | (this fork) hardware backend for the H.265 sub-stream transcode; `videotoolbox` on macOS |
 | `--adopted` | (this fork) connect without an adoption token once the camera is in Protect |
