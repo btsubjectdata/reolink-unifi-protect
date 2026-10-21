@@ -687,11 +687,18 @@ class RTSPCam(UnifiCamBase):
             for d in descriptors:
                 if d["trackerID"] not in made:
                     made.add(d["trackerID"])
-                    asyncio.create_task(
+                    task = asyncio.create_task(
                         self._make_object_crop(
                             d["trackerID"], d["objectType"], d["coord"]
                         )
                     )
+                    # trigger_motion_stop waits for these so a crop that is
+                    # still being picked lands in the stop payload
+                    tasks = getattr(self, "_crop_tasks", None)
+                    if tasks is None:
+                        tasks = self._crop_tasks = set()
+                    tasks.add(task)
+                    task.add_done_callback(tasks.discard)
         elif (
             self._motion_event_ts
             and not self._enrich_only()
@@ -797,7 +804,7 @@ class RTSPCam(UnifiCamBase):
         best_n, best_box = -1, None
         t, step = 0.0, 0.5
         try:
-            while t < window:
+            while t < window and not getattr(self, "_motion_ending", False):
                 await asyncio.sleep(step)
                 t += step
                 if not await self._grab_frame(cand):
@@ -931,6 +938,10 @@ class RTSPCam(UnifiCamBase):
             if not self._motion_event_ts:
                 # Event already ended; the stop payload went out without
                 # this crop and appending now would pollute the next one.
+                self.logger.info(
+                    f"Object crop for {kind}#{tracker_id} finished after the"
+                    " event ended; dropped"
+                )
                 return
             self._smart_snapshots.append(
                 {

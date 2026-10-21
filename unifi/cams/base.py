@@ -751,6 +751,22 @@ class UnifiCamBase(metaclass=ABCMeta):
         motion_start_ts = self._motion_event_ts
         motion_object_type = self._motion_object_type
         if motion_start_ts:
+            # Let an in-flight thumbnail crop finish first: the stop payload
+            # is the only place it can be announced. The motion picker stops
+            # sampling as soon as _motion_ending is set, so this is short.
+            self._motion_ending = True
+            try:
+                pending = {
+                    t for t in getattr(self, "_crop_tasks", set()) if not t.done()
+                }
+                if pending:
+                    self.logger.info(
+                        f"Waiting for {len(pending)} thumbnail crop(s) before"
+                        " ending the event"
+                    )
+                    await asyncio.wait(pending, timeout=6)
+            finally:
+                self._motion_ending = False
             payload: dict[str, Any] = {
                 "clockBestMonotonic": int(self.get_uptime()),
                 "clockBestWall": int(round(motion_start_ts * 1000)),
