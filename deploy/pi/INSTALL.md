@@ -245,6 +245,13 @@ Protect **remove** the camera and adopt it again (Protect caches resolution at a
 two sessions. Or the Pi is on WiFi. Or the log says `RTP packets lost`: fix the camera's WiFi
 signal (an AP closer, a less crowded 2.4 GHz channel).
 
+**Live view works but no events at all from one camera.** First check the Tapo app: Settings →
+Detection — Tapo cameras have been seen to turn Person detection *off* by themselves (after a
+firmware update, or when the camera's event engine wedges), and the app may just spin when you
+try to turn it back on. The cure is a **full power cycle** (unplug 10 s), not the app's reboot
+button. The bridge reconnects by itself when the camera comes back; `./bridge.sh logs <camera>`
+shows `push-subscribed` followed by `person detected` on your next walk-by.
+
 **Events arrive but no thumbnails.** `./bridge.sh logs driveway` → look for `Motion thumbnail`
 and `Object crop ready`. If you see "finished after the event ended", lower `THUMBNAIL_DELAY`
 to 3 in the camera file.
