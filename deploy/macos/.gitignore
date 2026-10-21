@@ -1,0 +1,6 @@
+.env
+client.pem
+*.log
+.DS_Store
+config-staging/
+logs/
