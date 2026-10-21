@@ -1,8 +1,8 @@
 import argparse
 import asyncio
-import shutil
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -696,7 +696,9 @@ class RTSPCam(UnifiCamBase):
             self._motion_event_ts
             and not self._enrich_only()
             and time.time() - getattr(self, "_sink_last_boxes_ts", 0)
-            > float(getattr(self.args, "ai_clear_after", None) or self.AI_CLEAR_AFTER_SEC)
+            > float(
+                getattr(self.args, "ai_clear_after", None) or self.AI_CLEAR_AFTER_SEC
+            )
         ):
             self.logger.info("AI boxes clear — ending smart event")
             await self.trigger_motion_stop()
@@ -706,10 +708,18 @@ class RTSPCam(UnifiCamBase):
         """(width, height) of an image via ffprobe, or (0, 0) if unknown."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffprobe", "-v", "error", "-select_streams", "v:0",
-                "-show_entries", "stream=width,height", "-of", "csv=p=0",
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=p=0",
                 str(path),
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
             )
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             w, h = out.decode().strip().split(",")[:2]
@@ -717,17 +727,26 @@ class RTSPCam(UnifiCamBase):
         except Exception:
             return 0, 0
 
-
     _MOTION_W, _MOTION_H = 192, 108
 
     async def _gray_small(self, path: Path) -> bytes:
         """Frame as 192x108 8-bit grey, for cheap motion comparison."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-v", "error", "-i", str(path),
-                "-vf", f"scale={self._MOTION_W}:{self._MOTION_H}",
-                "-pix_fmt", "gray", "-f", "rawvideo", "-",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                str(path),
+                "-vf",
+                f"scale={self._MOTION_W}:{self._MOTION_H}",
+                "-pix_fmt",
+                "gray",
+                "-f",
+                "rawvideo",
+                "-",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
             )
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             return out if len(out) == self._MOTION_W * self._MOTION_H else b""
@@ -794,11 +813,20 @@ class RTSPCam(UnifiCamBase):
                 return None, None
             w, h = self._MOTION_W, self._MOTION_H
             if best_n < 0.001 * w * h:  # < 0.1% of pixels changed: noise
-                self.logger.info(f"Motion thumbnail: nothing moved ({best_n} px), using centre")
+                self.logger.info(
+                    f"Motion thumbnail: nothing moved ({best_n} px), using centre"
+                )
                 return best, None
             x0, y0, x1, y1 = best_box
-            self.logger.info(f"Motion thumbnail: {best_n} px changed, grid box {best_box}")
-            return best, [x0 * 1000 / w, y0 * 1000 / h, (x1 - x0 + 1) * 1000 / w, (y1 - y0 + 1) * 1000 / h]
+            self.logger.info(
+                f"Motion thumbnail: {best_n} px changed, grid box {best_box}"
+            )
+            return best, [
+                x0 * 1000 / w,
+                y0 * 1000 / h,
+                (x1 - x0 + 1) * 1000 / w,
+                (y1 - y0 + 1) * 1000 / h,
+            ]
         finally:
             base.unlink(missing_ok=True)
             cand.unlink(missing_ok=True)
@@ -817,7 +845,9 @@ class RTSPCam(UnifiCamBase):
             delay = float(getattr(self.args, "thumbnail_delay", 0) or 0)
             motion_box = None
             if mode == "motion":
-                src, motion_box = await self._pick_motion_frame(tracker_id, max(delay, 0.5))
+                src, motion_box = await self._pick_motion_frame(
+                    tracker_id, max(delay, 0.5)
+                )
                 if src is None:
                     return
                 if motion_box is not None:

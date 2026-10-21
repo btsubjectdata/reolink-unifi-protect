@@ -49,7 +49,10 @@ class Core(object):
         return headers
 
     async def run(self) -> None:
-        if getattr(self.args, "adopted", False) or os.environ.get("UCP_NO_TOKEN") == "1":
+        if (
+            getattr(self.args, "adopted", False)
+            or os.environ.get("UCP_NO_TOKEN") == "1"
+        ):
             # already adopted: connect like a real camera does after adoption
             uri = "wss://{}:7442/camera/1.0/ws".format(self.host)
         else:
@@ -70,7 +73,8 @@ class Core(object):
                 "Creating ws connection to"
                 + (
                     f" wss://{self.host}:7442/camera/1.0/ws (no token)"
-                    if getattr(self.args, "adopted", False) or os.environ.get("UCP_NO_TOKEN") == "1"
+                    if getattr(self.args, "adopted", False)
+                    or os.environ.get("UCP_NO_TOKEN") == "1"
                     else f" wss://{self.host}:7442/camera/1.0/ws?token={self.token[:4]}…"
                 )
             )

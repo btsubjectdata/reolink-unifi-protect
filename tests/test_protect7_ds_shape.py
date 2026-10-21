@@ -24,11 +24,32 @@ from unifi.cams.rtsp import RTSPCam
 
 REAL_DESCRIPTOR_KEYS = {
     # from a G4 Doorbell's EventSmartDetect, Protect 7.3.70
-    "id", "objectType", "attributes", "boxColor", "confidenceLevel", "depth",
-    "speed", "timestamp", "duration", "coord", "coord3d", "firstShownTimeMs",
-    "idleSinceTimeMs", "lines", "loiterZones", "name", "licensePlate",
-    "matchedId", "secondLensZones", "stationary", "tag", "trackerID", "zones",
-    "intelligenceZones", "associatedFaceTrackerID", "faceEmbed",
+    "id",
+    "objectType",
+    "attributes",
+    "boxColor",
+    "confidenceLevel",
+    "depth",
+    "speed",
+    "timestamp",
+    "duration",
+    "coord",
+    "coord3d",
+    "firstShownTimeMs",
+    "idleSinceTimeMs",
+    "lines",
+    "loiterZones",
+    "name",
+    "licensePlate",
+    "matchedId",
+    "secondLensZones",
+    "stationary",
+    "tag",
+    "trackerID",
+    "zones",
+    "intelligenceZones",
+    "associatedFaceTrackerID",
+    "faceEmbed",
 }
 
 
@@ -45,7 +66,9 @@ def test_envelope_has_timestamp_and_status_code(cam):
     msg = cam.gen_response("EventSmartDetect", payload={"x": 1})
     assert msg["statusCode"] == 0
     # 2026-10-20T23:32:58.383+00:00 — what a real camera sends
-    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}\+00:00", msg["timeStamp"])
+    assert re.fullmatch(
+        r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}\+00:00", msg["timeStamp"]
+    )
     assert msg["to"] == "UniFiVideo" and msg["from"] == "ubnt_avclient"
     json.dumps(msg)  # serialisable
 
@@ -79,15 +102,25 @@ def test_payload_fill_adds_zone_level_and_null_maps(cam):
     assert payload["zonesStatus"]["1"] == {"status": "enter", "level": 0}
     # null, not {}: a non-null linesStatus makes ds file the event as a
     # line-crossing (smartDetectLine) instead of a zone detection
-    for k in ("linesStatus", "loiterZonesStatus", "intelligenceZonesStatus", "tamperStatus", "trackerIDAttrMap"):
+    for k in (
+        "linesStatus",
+        "loiterZonesStatus",
+        "intelligenceZonesStatus",
+        "tamperStatus",
+        "trackerIDAttrMap",
+    ):
         assert payload[k] is None, k
     assert payload["smartDetectSnapshots"] == []
     assert payload["smartDetectSnapshotFullFoVHeight"] == 0
 
 
 def test_payload_fill_keeps_existing_values(cam):
-    payload = {"edgeType": "leave", "zonesStatus": {"1": {"status": "leave", "level": 5}},
-               "trackerIDAttrMap": {"9": {}}, "smartDetectSnapshots": [{"a": 1}]}
+    payload = {
+        "edgeType": "leave",
+        "zonesStatus": {"1": {"status": "leave", "level": 5}},
+        "trackerIDAttrMap": {"9": {}},
+        "smartDetectSnapshots": [{"a": 1}],
+    }
     cam._ds_payload_fill(payload)
     assert payload["zonesStatus"]["1"]["level"] == 5
     assert payload["trackerIDAttrMap"] == {"9": {}}

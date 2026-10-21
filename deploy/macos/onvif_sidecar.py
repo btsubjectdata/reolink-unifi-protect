@@ -15,15 +15,15 @@ Usage:
   onvif_sidecar.py --host IP [--port 2020] --user U --password P --sink URL
   onvif_sidecar.py --host IP --user U --password P --dump 60   # print raw events
 """
+
 import argparse
 import asyncio
-import pathlib
 import base64
 import hashlib
 import json
 import os
+import pathlib
 import re
-import sys
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -68,7 +68,13 @@ def ws_security(user: str, password: str) -> str:
     </wsse:Security>"""
 
 
-def envelope(user: str, password: str, body: str, to: str | None = None, action: str | None = None) -> str:
+def envelope(
+    user: str,
+    password: str,
+    body: str,
+    to: str | None = None,
+    action: str | None = None,
+) -> str:
     addressing = ""
     if to:
         addressing = f"""<wsa:To xmlns:wsa="http://www.w3.org/2005/08/addressing">{to}</wsa:To>
@@ -94,17 +100,30 @@ class OnvifEvents:
         self.sub_url: str | None = None
         self.session: aiohttp.ClientSession | None = None
 
-    async def soap(self, url: str, body: str, action: str | None = None, to: str | None = None) -> ET.Element:
+    async def soap(
+        self, url: str, body: str, action: str | None = None, to: str | None = None
+    ) -> ET.Element:
         xml = envelope(self.user, self.password, body, to=to, action=action)
-        headers = {"Content-Type": 'application/soap+xml; charset=utf-8' + (f'; action="{action}"' if action else "")}
-        async with self.session.post(url, data=xml.encode(), headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as r:
+        headers = {
+            "Content-Type": "application/soap+xml; charset=utf-8"
+            + (f'; action="{action}"' if action else "")
+        }
+        async with self.session.post(
+            url,
+            data=xml.encode(),
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as r:
             text = await r.text()
             if r.status >= 400 and "Fault" not in text:
                 raise RuntimeError(f"HTTP {r.status} from {url}: {text[:300]}")
         root = ET.fromstring(text)
         fault = root.find(".//{http://www.w3.org/2003/05/soap-envelope}Fault")
         if fault is not None:
-            raise RuntimeError("SOAP fault: " + " ".join(t.strip() for t in fault.itertext() if t.strip())[:300])
+            raise RuntimeError(
+                "SOAP fault: "
+                + " ".join(t.strip() for t in fault.itertext() if t.strip())[:300]
+            )
         return root
 
     async def connect(self) -> None:
@@ -135,7 +154,9 @@ class OnvifEvents:
                     if strip_ns(c.tag) == "Address":
                         addr = (c.text or "").strip()
         if not addr:
-            raise RuntimeError("no SubscriptionReference in CreatePullPointSubscription response")
+            raise RuntimeError(
+                "no SubscriptionReference in CreatePullPointSubscription response"
+            )
         self.sub_url = re.sub(r"^http://[^/]+", f"http://{self.host}:{self.port}", addr)
         log(f"subscribed: events={self.events_url} subscription={self.sub_url}")
 
@@ -163,7 +184,10 @@ class OnvifEvents:
         if not media:
             return None
         media = re.sub(r"^http://[^/]+", f"http://{self.host}:{self.port}", media)
-        root = await self.soap(media, '<trt:GetProfiles xmlns:trt="http://www.onvif.org/ver10/media/wsdl"/>')
+        root = await self.soap(
+            media,
+            '<trt:GetProfiles xmlns:trt="http://www.onvif.org/ver10/media/wsdl"/>',
+        )
         token = None
         for el in root.iter():
             if strip_ns(el.tag) == "Profiles" and el.get("token"):
@@ -177,12 +201,17 @@ class OnvifEvents:
         )
         for el in root.iter():
             if strip_ns(el.tag) == "Uri":
-                return re.sub(r"^http://[^/]+", f"http://{self.host}:{self.port}", (el.text or "").strip())
+                return re.sub(
+                    r"^http://[^/]+",
+                    f"http://{self.host}:{self.port}",
+                    (el.text or "").strip(),
+                )
         return None
 
     async def connect_push(self, consumer_url: str) -> None:
         """WS-BaseNotification Subscribe: the camera POSTs Notify messages to consumer_url.
-        Tapo's pull point hangs up on every PullMessages, but push works (HA does the same)."""
+        Tapo's pull point hangs up on every PullMessages, but push works (HA does the same).
+        """
         if not self.events_url:
             root = await self.soap(
                 self.device_url,
@@ -196,13 +225,16 @@ class OnvifEvents:
                             xaddr = (c.text or "").strip()
             if not xaddr:
                 raise RuntimeError("camera reports no Events service")
-            self.events_url = re.sub(r"^http://[^/]+", f"http://{self.host}:{self.port}", xaddr)
+            self.events_url = re.sub(
+                r"^http://[^/]+", f"http://{self.host}:{self.port}", xaddr
+            )
         body = f"""<wsnt:Subscribe xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2" xmlns:wsa="http://www.w3.org/2005/08/addressing">
           <wsnt:ConsumerReference><wsa:Address>{consumer_url}</wsa:Address></wsnt:ConsumerReference>
           <wsnt:InitialTerminationTime>PT120S</wsnt:InitialTerminationTime>
         </wsnt:Subscribe>"""
         root = await self.soap(
-            self.events_url, body,
+            self.events_url,
+            body,
             action="http://docs.oasis-open.org/wsn/bw-2/NotificationProducer/SubscribeRequest",
             to=self.events_url,
         )
@@ -262,6 +294,7 @@ def parse_notifications(root: ET.Element) -> list[dict]:
 
 def local_ip_towards(host: str) -> str:
     import socket
+
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect((host, 9))
@@ -272,7 +305,10 @@ def local_ip_towards(host: str) -> str:
 
 def classify(topic: str, items: dict) -> list[tuple[str, bool]]:
     """-> [(class, active)] for one notification. Unknown topics -> []."""
-    truthy = lambda v: str(v).strip().lower() in ("true", "1", "on")
+
+    def truthy(v):
+        return str(v).strip().lower() in ("true", "1", "on")
+
     results = []
     # 1. per-item names like IsPeople / IsVehicle / IsPet (Tapo TPSmartEvent style)
     for name, value in items.items():
@@ -285,7 +321,14 @@ def classify(topic: str, items: dict) -> list[tuple[str, bool]]:
     # 2. topic names like RuleEngine/PeopleDetector/People with a State/IsXxx item
     for rx, cls in CLASS_RULES:
         if rx.search(topic):
-            state = next((v for k, v in items.items() if k.lower() in ("state", "ismotion", "isinside", "value")), None)
+            state = next(
+                (
+                    v
+                    for k, v in items.items()
+                    if k.lower() in ("state", "ismotion", "isinside", "value")
+                ),
+                None,
+            )
             if state is None and items:
                 state = list(items.values())[-1]
             return [(cls, truthy(state) if state is not None else True)]
@@ -294,7 +337,9 @@ def classify(topic: str, items: dict) -> list[tuple[str, bool]]:
 
 async def run(args: argparse.Namespace) -> None:
     active: dict[str, float] = {}  # class -> time it was last reported active
-    HOLD = args.hold  # seconds a class stays "present" after its last active notification
+    HOLD = (
+        args.hold
+    )  # seconds a class stays "present" after its last active notification
 
     async def poster(session: aiohttp.ClientSession):
         while True:
@@ -305,7 +350,11 @@ async def run(args: argparse.Namespace) -> None:
                 if now - ts < HOLD
             ]
             try:
-                await session.post(args.sink, json={"boxes": boxes}, timeout=aiohttp.ClientTimeout(total=2))
+                await session.post(
+                    args.sink,
+                    json={"boxes": boxes},
+                    timeout=aiohttp.ClientTimeout(total=2),
+                )
             except Exception as e:  # proxy restarting — keep going
                 if int(now) % 30 == 0:
                     log(f"sink unreachable: {e}")
@@ -313,7 +362,9 @@ async def run(args: argparse.Namespace) -> None:
 
     # Tapo closes the TCP connection after every SOAP reply; a reused keep-alive socket
     # then fails with "Server disconnected". Force a fresh connection per request.
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True)) as session:
+    async with aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(force_close=True)
+    ) as session:
         ev = OnvifEvents(args.host, args.port, args.user, args.password)
         ev.session = session
         if not args.dump:
@@ -402,13 +453,17 @@ async def run(args: argparse.Namespace) -> None:
             except Exception as e:
                 await ev.unsubscribe()
                 if "InvalidArgVal" in str(e):
-                    backoff = max(backoff, 30)  # subscription table full; let stale ones expire
+                    backoff = max(
+                        backoff, 30
+                    )  # subscription table full; let stale ones expire
                 log(f"ONVIF error: {e} — reconnecting in {backoff}s")
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 120)
 
 
-async def serve_snapshots(args, ev: "OnvifEvents", session: aiohttp.ClientSession) -> None:
+async def serve_snapshots(
+    args, ev: "OnvifEvents", session: aiohttp.ClientSession
+) -> None:
     """GET /snapshot.jpg on 127.0.0.1:<snapshot_port> -> the camera's ONVIF snapshot.
 
     Lets the proxy use --snapshot-url instead of a third always-on RTSP session
@@ -433,9 +488,15 @@ async def serve_snapshots(args, ev: "OnvifEvents", session: aiohttp.ClientSessio
         u = await uri()
         if u:
             try:
-                async with session.get(u, auth=aiohttp.BasicAuth(args.user, args.password), timeout=aiohttp.ClientTimeout(total=10)) as r:
+                async with session.get(
+                    u,
+                    auth=aiohttp.BasicAuth(args.user, args.password),
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as r:
                     data = await r.read()
-                    log(f"snapshot fetch: HTTP {r.status} {r.headers.get('Content-Type')} {len(data)} bytes")
+                    log(
+                        f"snapshot fetch: HTTP {r.status} {r.headers.get('Content-Type')} {len(data)} bytes"
+                    )
             except Exception as e:
                 log(f"snapshot fetch failed: {e}")
         return
@@ -453,9 +514,23 @@ async def serve_snapshots(args, ev: "OnvifEvents", session: aiohttp.ClientSessio
             if time.time() - cache["ts"] < 4 and cache["data"]:
                 return cache["data"]
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp",
-                "-i", args.rtsp_snapshot_url, "-frames:v", "1", "-q:v", "4", "-f", "image2", "pipe:1",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                "ffmpeg",
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-rtsp_transport",
+                "tcp",
+                "-i",
+                args.rtsp_snapshot_url,
+                "-frames:v",
+                "1",
+                "-q:v",
+                "4",
+                "-f",
+                "image2",
+                "pipe:1",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
             )
             try:
                 data, _ = await asyncio.wait_for(proc.communicate(), timeout=12)
@@ -482,7 +557,11 @@ async def serve_snapshots(args, ev: "OnvifEvents", session: aiohttp.ClientSessio
         u = await uri()
         if u:
             try:
-                async with session.get(u, auth=aiohttp.BasicAuth(args.user, args.password), timeout=aiohttp.ClientTimeout(total=10)) as r:
+                async with session.get(
+                    u,
+                    auth=aiohttp.BasicAuth(args.user, args.password),
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as r:
                     data = await r.read()
                     if r.status == 200 and data:
                         return web.Response(body=data, content_type="image/jpeg")
@@ -505,21 +584,63 @@ async def serve_snapshots(args, ev: "OnvifEvents", session: aiohttp.ClientSessio
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--host", required=True)
     p.add_argument("--port", type=int, default=2020)
     p.add_argument("--user", required=True)
     p.add_argument("--password", required=True)
     p.add_argument("--sink", default="http://127.0.0.1:7999/detections")
-    p.add_argument("--interval", type=float, default=0.4, help="seconds between sink posts")
-    p.add_argument("--hold", type=float, default=4.0, help="seconds a class stays present after its last 'true' notification (Tapo repeats them every 1-4 s; a 'false' clears it at once)")
-    p.add_argument("--mode", choices=("push", "pull"), default="push", help="push: camera POSTs events to us (Tapo needs this); pull: ONVIF PullPoint")
-    p.add_argument("--push-port", type=int, default=0, help="local port the camera posts events to (default: sink port + 2000)")
-    p.add_argument("--push-host", default="", help="our IP as the camera should see it (default: auto)")
-    p.add_argument("--snapshot-file", default="", help="serve this JPEG (kept fresh by the proxy's --snapshot-tee) at /snapshot.jpg")
-    p.add_argument("--rtsp-snapshot-url", default="", help="RTSP URL (sub stream) to grab a frame from when the camera has no ONVIF snapshot")
-    p.add_argument("--snapshot-port", type=int, default=0, help="serve the camera's ONVIF snapshot at /snapshot.jpg on this local port")
-    p.add_argument("--dump", type=int, default=0, metavar="SECONDS", help="print raw events for N seconds and exit")
+    p.add_argument(
+        "--interval", type=float, default=0.4, help="seconds between sink posts"
+    )
+    p.add_argument(
+        "--hold",
+        type=float,
+        default=4.0,
+        help="seconds a class stays present after its last 'true' notification (Tapo repeats them every 1-4 s; a 'false' clears it at once)",
+    )
+    p.add_argument(
+        "--mode",
+        choices=("push", "pull"),
+        default="push",
+        help="push: camera POSTs events to us (Tapo needs this); pull: ONVIF PullPoint",
+    )
+    p.add_argument(
+        "--push-port",
+        type=int,
+        default=0,
+        help="local port the camera posts events to (default: sink port + 2000)",
+    )
+    p.add_argument(
+        "--push-host",
+        default="",
+        help="our IP as the camera should see it (default: auto)",
+    )
+    p.add_argument(
+        "--snapshot-file",
+        default="",
+        help="serve this JPEG (kept fresh by the proxy's --snapshot-tee) at /snapshot.jpg",
+    )
+    p.add_argument(
+        "--rtsp-snapshot-url",
+        default="",
+        help="RTSP URL (sub stream) to grab a frame from when the camera has no ONVIF snapshot",
+    )
+    p.add_argument(
+        "--snapshot-port",
+        type=int,
+        default=0,
+        help="serve the camera's ONVIF snapshot at /snapshot.jpg on this local port",
+    )
+    p.add_argument(
+        "--dump",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        help="print raw events for N seconds and exit",
+    )
     args = p.parse_args()
     if not args.push_port:
         m = re.search(r":(\d+)/", args.sink)

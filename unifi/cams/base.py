@@ -1912,7 +1912,7 @@ class UnifiCamBase(metaclass=ABCMeta):
                 # Second output on the same ffmpeg: decode the video once per
                 # second into a JPEG (-update 1 rewrites the file in place).
                 tee = (
-                    f' -map 0:v:0 -r 1 -update 1 -q:v 4 -f image2'
+                    f" -map 0:v:0 -r 1 -update 1 -q:v 4 -f image2"
                     f' "{self.args.snapshot_tee}"'
                 )
                 # NB: no -skip_frame nokey here: ffmpeg applies it to the stream's

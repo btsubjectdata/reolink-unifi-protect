@@ -206,7 +206,9 @@ async def run():
         if not args.token:
             args.token = await generate_token(args, logger)
         if not args.token:
-            logger.error("A valid token is required (or pass --adopted once the camera is in Protect)")
+            logger.error(
+                "A valid token is required (or pass --adopted once the camera is in Protect)"
+            )
             sys.exit(1)
 
     cam = klass(args, logger)
