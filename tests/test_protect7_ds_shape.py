@@ -92,3 +92,22 @@ def test_payload_fill_keeps_existing_values(cam):
     assert payload["zonesStatus"]["1"]["level"] == 5
     assert payload["trackerIDAttrMap"] == {"9": {}}
     assert payload["smartDetectSnapshots"] == [{"a": 1}]
+
+
+def test_motion_box_finds_changed_region(cam):
+    w, h = cam._MOTION_W, cam._MOTION_H
+    before = bytes([0] * (w * h))
+    after = bytearray(before)
+    for y in range(10, 20):
+        for x in range(30, 40):
+            after[y * w + x] = 200
+    n, box = cam._motion_box(before, bytes(after))
+    assert n == 100 and box == (30, 10, 39, 19)
+
+
+def test_motion_box_ignores_small_noise(cam):
+    w, h = cam._MOTION_W, cam._MOTION_H
+    before = bytes([100] * (w * h))
+    after = bytes([120] * (w * h))  # 20 levels of lighting change: under threshold
+    n, _ = cam._motion_box(before, after)
+    assert n == 0

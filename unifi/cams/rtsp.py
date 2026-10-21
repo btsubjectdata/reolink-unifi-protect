@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import shutil
 import logging
 import subprocess
 import tempfile
@@ -117,19 +118,22 @@ class RTSPCam(UnifiCamBase):
         )
         parser.add_argument(
             "--thumbnail-crop",
-            choices=["object", "frame"],
+            choices=["object", "frame", "motion"],
             default="object",
             help="Event thumbnail: 'object' = square crop around the detection"
-            " box; 'frame' = the whole frame letterboxed into a square, for"
-            " sources whose detections carry no real position (e.g. ONVIF"
-            " event-level detections, which report a fixed box)",
+            " box; 'frame' = the whole frame letterboxed into a square;"
+            " 'motion' = for sources whose detections carry no real position"
+            " (e.g. ONVIF event-level detections): sample frames for"
+            " --thumbnail-delay seconds, keep the one that changed most since"
+            " the detection fired and crop a square around the changed area",
         )
         parser.add_argument(
             "--thumbnail-delay",
             default=1.0,
             type=float,
             help="Seconds to wait after the detection before grabbing the"
-            " thumbnail frame, so the subject has entered the shot",
+            " thumbnail frame, so the subject has entered the shot (for"
+            " --thumbnail-crop motion: how long to keep sampling frames)",
         )
         parser.add_argument(
             "--ai-movement-reports",
@@ -449,6 +453,87 @@ class RTSPCam(UnifiCamBase):
         except Exception:
             return 0, 0
 
+
+    _MOTION_W, _MOTION_H = 96, 54
+
+    async def _gray_small(self, path: Path) -> bytes:
+        """Frame as 96x54 8-bit grey, for cheap motion comparison."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-v", "error", "-i", str(path),
+                "-vf", f"scale={self._MOTION_W}:{self._MOTION_H}",
+                "-pix_fmt", "gray", "-f", "rawvideo", "-",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            return out if len(out) == self._MOTION_W * self._MOTION_H else b""
+        except Exception:
+            return b""
+
+    def _motion_box(self, before: bytes, after: bytes, thresh: int = 40):
+        """Changed-pixel count and bounding box (grid units) between two frames."""
+        w, h = self._MOTION_W, self._MOTION_H
+        n = 0
+        x0 = y0 = 10**6
+        x1 = y1 = -1
+        for i in range(w * h):
+            if abs(before[i] - after[i]) > thresh:
+                n += 1
+                x, y = i % w, i // w
+                if x < x0: x0 = x
+                if x > x1: x1 = x
+                if y < y0: y0 = y
+                if y > y1: y1 = y
+        return n, (x0, y0, x1, y1)
+
+    async def _grab_frame(self, dest: Path) -> bool:
+        """Copy the current snapshot (URL or tee file) to dest."""
+        if self.args.snapshot_url:
+            return await self.fetch_to_file(self.args.snapshot_url, dest)
+        snap = await self.get_snapshot()
+        if not snap.exists():
+            return False
+        shutil.copyfile(snap, dest)
+        return True
+
+    async def _pick_motion_frame(self, tracker_id: int, window: float):
+        """Sample frames for `window` seconds; return (path, box) of the one
+        that differs most from the frame at detection time, box in 0-1000
+        units of the frame, or (path, None) when nothing moved enough."""
+        base = Path(self.snapshot_dir, f"crop_base_{tracker_id}.jpg")
+        best = Path(self.snapshot_dir, f"crop_src_{tracker_id}.jpg")
+        cand = Path(self.snapshot_dir, f"crop_cand_{tracker_id}.jpg")
+        if not await self._grab_frame(base):
+            return None, None
+        before = await self._gray_small(base)
+        best_n, best_box = -1, None
+        t, step = 0.0, 0.5
+        try:
+            while t < window:
+                await asyncio.sleep(step)
+                t += step
+                if not await self._grab_frame(cand):
+                    continue
+                after = await self._gray_small(cand)
+                if not before or not after:
+                    continue
+                n, box = self._motion_box(before, after)
+                if n > best_n:
+                    best_n, best_box = n, box
+                    shutil.copyfile(cand, best)
+            if best_n < 0:
+                return None, None
+            w, h = self._MOTION_W, self._MOTION_H
+            if best_n < 0.004 * w * h:  # < 0.4% of pixels changed: noise
+                self.logger.info(f"Motion thumbnail: nothing moved ({best_n} px), using centre")
+                return best, None
+            x0, y0, x1, y1 = best_box
+            self.logger.info(f"Motion thumbnail: {best_n} px changed, grid box {best_box}")
+            return best, [x0 * 1000 / w, y0 * 1000 / h, (x1 - x0 + 1) * 1000 / w, (y1 - y0 + 1) * 1000 / h]
+        finally:
+            base.unlink(missing_ok=True)
+            cand.unlink(missing_ok=True)
+
     async def _make_object_crop(self, tracker_id: int, kind: str, coord: list) -> None:
         """Square crop around one detection, from a fresh camera snapshot.
 
@@ -458,11 +543,21 @@ class RTSPCam(UnifiCamBase):
         around the box so the subject has context.
         """
         fetched = Path(self.snapshot_dir, f"crop_src_{tracker_id}.jpg")
+        mode = getattr(self.args, "thumbnail_crop", "object")
         try:
             delay = float(getattr(self.args, "thumbnail_delay", 0) or 0)
-            if delay > 0:
+            motion_box = None
+            if mode == "motion":
+                src, motion_box = await self._pick_motion_frame(tracker_id, max(delay, 0.5))
+                if src is None:
+                    return
+                if motion_box is not None:
+                    coord = motion_box
+            elif delay > 0:
                 await asyncio.sleep(delay)
-            if self.args.snapshot_url:
+            if mode == "motion":
+                pass
+            elif self.args.snapshot_url:
                 if not await self.fetch_to_file(self.args.snapshot_url, fetched):
                     return
                 src = fetched
@@ -486,10 +581,19 @@ class RTSPCam(UnifiCamBase):
             box_w, box_h = w * fw / 1000, h * fh / 1000
             cx, cy = (x + w / 2) * fw / 1000, (y + h / 2) * fh / 1000
             side = int(max(320, min(fh, max(box_w, box_h) * 2.2)))
+            if mode == "motion":
+                if motion_box is None:
+                    # nothing moved: centre square of the frame, no letterbox
+                    side = int(fh)
+                    cx, cy = fw / 2, fh / 2
+                else:
+                    # zoom on the changed area, but never tighter than half
+                    # the frame height so a distant subject still has context
+                    side = int(max(fh * 0.5, min(fh, max(box_w, box_h) * 1.6)))
             left = int(min(max(cx - side / 2, 0), fw - side))
             top = int(min(max(cy - side / 2, 0), fh - side))
 
-            if getattr(self.args, "thumbnail_crop", "object") == "frame":
+            if mode == "frame":
                 # No real position: show the whole frame, letterboxed into
                 # the square Protect requires (isRealCropped).
                 side = int(min(fw, fh))

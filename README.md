@@ -145,7 +145,7 @@ adoption token in `.env`, and `docker compose up -d --force-recreate`.
 | `--snapshot-tee PATH`, `--snapshot-tee-stream` | (this fork) JPEG written once a second by a live stream's ffmpeg, for cameras that cap RTSP sessions |
 | `--transcode-backend {qsv,videotoolbox}` | (this fork) hardware backend for the H.265 sub-stream transcode; `videotoolbox` on macOS |
 | `--adopted` | (this fork) connect without an adoption token once the camera is in Protect |
-| `--thumbnail-crop {object,frame}`, `--thumbnail-delay` | (this fork) event thumbnail as a crop around the box, or the whole frame letterboxed square for sources with no real box position (ONVIF events); delay before grabbing it |
+| `--thumbnail-crop {object,frame,motion}`, `--thumbnail-delay` | (this fork) event thumbnail as a crop around the box; `frame` = whole frame letterboxed; `motion` = for sources with no real box position (ONVIF events): sample frames for `--thumbnail-delay` s, keep the one that changed most since the event fired and zoom on the changed area |
 
 ## Protocol notes
 

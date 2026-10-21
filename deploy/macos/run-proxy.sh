@@ -83,10 +83,11 @@ case "${CAM_TYPE:-rtsp}" in
       --ai-min-movement 0
       --ai-min-confidence "${AI_MIN_CONFIDENCE:-0.5}"
       --ai-classes "${AI_CLASSES:-person,vehicle,animal}"
-      # ONVIF events carry no position, so the event thumbnail is the whole
-      # frame (letterboxed square) grabbed a moment into the event
-      --thumbnail-crop "${THUMBNAIL_CROP:-frame}"
-      --thumbnail-delay "${THUMBNAIL_DELAY:-1.5}"
+      # ONVIF events carry no position: sample frames for THUMBNAIL_DELAY seconds,
+      # keep the one that changed most since the event fired and zoom on the
+      # changed area (THUMBNAIL_CROP=frame for the whole frame letterboxed instead)
+      --thumbnail-crop "${THUMBNAIL_CROP:-motion}"
+      --thumbnail-delay "${THUMBNAIL_DELAY:-3}"
     )
     ;;
 esac
