@@ -24,7 +24,39 @@ Most of it is general: the H.265 framing, identity emulation, and smart-detect
 event pipeline apply to any RTSP camera; the AI sidecar applies to any recent
 Reolink with on-board detection.
 
-> **Disclaimer**: not affiliated with Ubiquiti or Reolink. The proxy emulates
+## What this fork adds (btsubjectdata)
+
+This is [woutersteegers/reolink-unifi-protect](https://github.com/woutersteegers/reolink-unifi-protect)
+plus what it took to make it work on **UniFi Protect 7.3** with **TP-Link Tapo** cameras,
+running natively on a **Mac** (no Docker):
+
+- **Protect 7.x smart detections** — Protect 7 moved camera handling into a new Rust
+  "Device Service" that silently discards any `EventSmartDetect` it can't parse into its
+  structs. The proxy now sends the exact message shape a real G4/G5 does (`timeStamp` /
+  `statusCode` on the envelope, the full descriptor field set, `zonesStatus.level`, text
+  websocket frames, MAC normalised to 12 hex digits). Without this, Protect ≥ 7.x shows
+  motion only — no Person / Vehicle / Animal. Write-up:
+  [`deploy/macos/README.md` → *Protect 7 and the Device Service*](deploy/macos/README.md#protect-7-and-the-device-service).
+- **`--adopted`** — reconnect like an adopted camera (no adoption token / NVR login on
+  every restart).
+- **ONVIF event sidecar** (`deploy/macos/onvif_sidecar.py`) — person / vehicle / animal
+  detections from any ONVIF camera's own analytics (Tapo, and most cameras with on-board
+  AI), via push notifications. Event-level boxes, no moving tracks.
+- **`--transcode-backend videotoolbox`** — the HEVC sub-stream transcode on Apple silicon /
+  Intel Macs instead of Intel QSV.
+- **`--snapshot-tee`** — snapshots written by a live stream's ffmpeg, for cameras that cap
+  RTSP sessions (Tapo allows two).
+- **A macOS deploy kit** ([`deploy/macos/`](deploy/macos)) — double-click `.command`
+  scripts: install (Homebrew), configure, probe the camera, test, install as launchd
+  services, status/logs/update; plus a local **mediamtx RTSP relay** so Protect can open all
+  three of its streams while the camera only ever sees two sessions. Start at
+  [`deploy/macos/SETUP.md`](deploy/macos/SETUP.md).
+
+Verified with two Tapo C720 (H.264 2560×1440, ONVIF) on a UDM-SE, Protect 7.3.70, UniFi OS 5.1.33,
+Mac mini (Apple silicon), macOS 26. The Protect 7 changes are camera-agnostic; Reolink users on
+Protect 7 need them too.
+
+> **Disclaimer**: not affiliated with Ubiquiti, Reolink or TP-Link. The proxy emulates
 > a UniFi camera (UVC G5 Pro by default in the example config) toward your own
 > NVR. Protect updates may change the ingest protocol at any time.
 
@@ -105,6 +137,9 @@ adoption token in `.env`, and `docker compose up -d --force-recreate`.
 | `--ai-min-movement` | Suppresses detections that never move (kills "the house across the street is a person") |
 | `--ai-classes` | Class priority when picking an event type |
 | `--snapshot-url` | Snapshot via the camera's HTTP(S) API instead of a fourth RTSP session (Reolink WiFi cameras limit concurrent RTSP) |
+| `--snapshot-tee PATH`, `--snapshot-tee-stream` | (this fork) JPEG written once a second by a live stream's ffmpeg, for cameras that cap RTSP sessions |
+| `--transcode-backend {qsv,videotoolbox}` | (this fork) hardware backend for the H.265 sub-stream transcode; `videotoolbox` on macOS |
+| `--adopted` | (this fork) connect without an adoption token once the camera is in Protect |
 
 ## Protocol notes
 
@@ -141,4 +176,4 @@ smart-detection bridge is currently wired into the `rtsp` source.
 ## License
 
 MIT — see [LICENSE](LICENSE). Original work © 2023 Keshav Varma;
-modifications © 2026 Wouter Steegers.
+modifications © 2026 Wouter Steegers; macOS / Protect 7 / ONVIF additions © 2026 Bradley Todd (SubjectData LLC).
