@@ -1,0 +1,144 @@
+# ONVIF camera (e.g. TP-Link Tapo) -> UniFi Protect, with smart detections from the camera's own
+# analytics and no AI Port. Three services, all on the host network:
+#
+#   relay    mediamtx: pulls the camera's main + sub stream ONCE and re-serves them on
+#            127.0.0.1:${RELAY_PORT}/hi and /lo. Protect asks a "G5 Pro" for three streams
+#            (video1 high, video2 medium for live view, video3 low); straight from a Tapo that is
+#            three RTSP sessions against a limit of two, and Protect then restarts streams every
+#            few seconds. Behind the relay the camera always sees exactly two.
+#   proxy    unifi-cam-proxy (this fork): adoption, identity, streams, EventSmartDetect.
+#   sidecar  onvif_sidecar.py: subscribes to the camera's ONVIF events (push mode — PullPoint is
+#            broken on Tapo), posts person/vehicle/animal to the proxy, serves the snapshot JPEG
+#            that the proxy's --snapshot-tee keeps fresh (no third RTSP session).
+#
+# Why host networking: the camera has to POST its event notifications to the sidecar
+# (PUSH_PORT) and the sidecar auto-detects the host IP the camera can reach. Everything else
+# stays on 127.0.0.1.
+#
+#   cp .env.example .env   # fill in
+#   docker compose up -d --build
+#   docker compose logs -f proxy
+# Then adopt the camera in Protect, set ADOPTED=1 in .env and `docker compose up -d`.
+services:
+  relay:
+    image: bluenviron/mediamtx:1.21.2
+    container_name: ${CAM_NAME:-cam}-relay
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MTX_LOGLEVEL: info
+      MTX_API: "no"
+      MTX_METRICS: "no"
+      MTX_PLAYBACK: "no"
+      MTX_RTMP: "no"
+      MTX_HLS: "no"
+      MTX_WEBRTC: "no"
+      MTX_SRT: "no"
+      MTX_RTSPADDRESS: "127.0.0.1:${RELAY_PORT:-8554}"
+      MTX_RTSPTRANSPORTS: "tcp"
+      MTX_PATHS_HI_SOURCE: "rtsp://${CAM_USER}:${CAM_PASS}@${CAM_IP}:554/${HI_PATH:-stream1}"
+      MTX_PATHS_HI_RTSPTRANSPORT: "tcp"
+      MTX_PATHS_HI_SOURCEONDEMAND: "no"
+      MTX_PATHS_LO_SOURCE: "rtsp://${CAM_USER}:${CAM_PASS}@${CAM_IP}:554/${LO_PATH:-stream2}"
+      MTX_PATHS_LO_RTSPTRANSPORT: "tcp"
+      MTX_PATHS_LO_SOURCEONDEMAND: "no"
+    logging: &log
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  proxy:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: unifi-cam-proxy:protect7
+    container_name: ${CAM_NAME:-cam}-proxy
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [relay]
+    volumes:
+      - ./client.pem:/client.pem:ro
+      - snapshots:/snapshots
+      - type: tmpfs
+        target: /tmp
+        tmpfs: { size: 268435456 }
+    logging: *log
+    environment:
+      NVR_IP: ${NVR_IP}
+      NVR_USER: ${NVR_USER:-}
+      NVR_PASS: ${NVR_PASS:-}
+      ADOPTION_TOKEN: ${ADOPTION_TOKEN:-}
+      ADOPTED: ${ADOPTED:-0}
+      CAM_IP: ${CAM_IP}
+      CAM_NAME: ${CAM_NAME}
+      CAM_MAC: ${CAM_MAC}
+      MODEL: ${MODEL:-UVC G5 Pro}
+      SYSID: ${SYSID:-0xa598}
+      PLATFORM: ${PLATFORM:-sav837gw}
+      FW_VERSION: ${FW_VERSION:-5.5.31}
+      FW_BUILD: ${FW_BUILD:-92ebf37.260724.1639}
+      RELAY_PORT: ${RELAY_PORT:-8554}
+      AI_SINK_PORT: ${AI_SINK_PORT:-7999}
+      SNAPSHOT_PORT: ${SNAPSHOT_PORT:-8999}
+      AI_MIN_CONFIDENCE: ${AI_MIN_CONFIDENCE:-0.5}
+      AI_CLASSES: ${AI_CLASSES:-person,vehicle,animal}
+      FFMPEG_ARGS: ${FFMPEG_ARGS:--c:v copy -ar 32000 -ac 1 -codec:a aac -b:a 32k}
+      HI_CODEC: ${HI_CODEC:-h264}
+      HI_WIDTH: ${HI_WIDTH:-2560}
+      HI_HEIGHT: ${HI_HEIGHT:-1440}
+      HI_FPS: ${HI_FPS:-15}
+      LO_CODEC: ${LO_CODEC:-h264}
+      LO_WIDTH: ${LO_WIDTH:-1280}
+      LO_HEIGHT: ${LO_HEIGHT:-720}
+      LO_FPS: ${LO_FPS:-15}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ -n "$$ADOPTION_TOKEN" ]; then AUTH="--token $$ADOPTION_TOKEN"; else AUTH="--nvr-username $$NVR_USER --nvr-password $$NVR_PASS"; fi
+        [ "$$ADOPTED" = "1" ] && AUTH="$$AUTH --adopted"
+        # wait for the relay to come up
+        i=0; until nc -z 127.0.0.1 "$$RELAY_PORT" || [ $$i -ge 30 ]; do i=$$((i+1)); sleep 1; done
+        exec unifi-cam-proxy --host "$$NVR_IP" --cert /client.pem $$AUTH \
+          --mac "$$CAM_MAC" --ip "$$CAM_IP" --name "$$CAM_NAME" \
+          --model "$$MODEL" --sysid "$$SYSID" --platform "$$PLATFORM" --fw-version "$$FW_VERSION" --fw-build "$$FW_BUILD" \
+          rtsp -s "rtsp://127.0.0.1:$$RELAY_PORT/hi" "rtsp://127.0.0.1:$$RELAY_PORT/lo" --rtsp-transport tcp \
+          --ffmpeg-args "$$FFMPEG_ARGS" \
+          --hi-codec "$$HI_CODEC" --hi-width "$$HI_WIDTH" --hi-height "$$HI_HEIGHT" --hi-fps "$$HI_FPS" \
+          --lo-codec "$$LO_CODEC" --lo-width "$$LO_WIDTH" --lo-height "$$LO_HEIGHT" --lo-fps "$$LO_FPS" \
+          --snapshot-url "http://127.0.0.1:$$SNAPSHOT_PORT/snapshot.jpg" \
+          --snapshot-tee /snapshots/cam.jpg --snapshot-tee-stream video3 \
+          --ai-sink-port "$$AI_SINK_PORT" --ai-min-movement 0 \
+          --ai-min-confidence "$$AI_MIN_CONFIDENCE" --ai-classes "$$AI_CLASSES"
+
+  sidecar:
+    build:
+      context: ..
+      dockerfile: onvif-sidecar/Dockerfile
+    image: onvif-sidecar:latest
+    container_name: ${CAM_NAME:-cam}-sidecar
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [proxy]
+    volumes:
+      - snapshots:/snapshots:ro
+    logging: *log
+    command:
+      - --host
+      - "${CAM_IP}"
+      - --port
+      - "${ONVIF_PORT:-2020}"
+      - --user
+      - "${CAM_USER}"
+      - --password
+      - "${CAM_PASS}"
+      - --sink
+      - "http://127.0.0.1:${AI_SINK_PORT:-7999}/detections"
+      - --push-port
+      - "${PUSH_PORT:-9999}"
+      - --snapshot-port
+      - "${SNAPSHOT_PORT:-8999}"
+      - --snapshot-file
+      - /snapshots/cam.jpg
+
+volumes:
+  snapshots:

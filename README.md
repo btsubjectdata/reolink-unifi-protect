@@ -46,6 +46,10 @@ running natively on a **Mac** (no Docker):
   Intel Macs instead of Intel QSV.
 - **`--snapshot-tee`** — snapshots written by a live stream's ffmpeg, for cameras that cap
   RTSP sessions (Tapo allows two).
+- **Docker stack for ONVIF cameras** ([`deploy/onvif/`](deploy/onvif)) — proxy + ONVIF sidecar +
+  mediamtx relay in one `docker compose up`, for any Docker host. The existing Reolink
+  [`deploy/docker-compose.yml`](deploy/docker-compose.yml) keeps working and gets the Protect 7
+  fixes for free (they are in the source, not in the deploy kits).
 - **A macOS deploy kit** ([`deploy/macos/`](deploy/macos)) — double-click `.command`
   scripts: install (Homebrew), configure, probe the camera, test, install as launchd
   services, status/logs/update; plus a local **mediamtx RTSP relay** so Protect can open all
