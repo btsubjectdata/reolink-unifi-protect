@@ -454,10 +454,10 @@ class RTSPCam(UnifiCamBase):
             return 0, 0
 
 
-    _MOTION_W, _MOTION_H = 96, 54
+    _MOTION_W, _MOTION_H = 192, 108
 
     async def _gray_small(self, path: Path) -> bytes:
-        """Frame as 96x54 8-bit grey, for cheap motion comparison."""
+        """Frame as 192x108 8-bit grey, for cheap motion comparison."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-v", "error", "-i", str(path),
@@ -470,21 +470,26 @@ class RTSPCam(UnifiCamBase):
         except Exception:
             return b""
 
-    def _motion_box(self, before: bytes, after: bytes, thresh: int = 40):
-        """Changed-pixel count and bounding box (grid units) between two frames."""
+    def _motion_box(self, before: bytes, after: bytes, thresh: int = 25):
+        """Changed-pixel count and bounding box (grid units) between two frames.
+
+        The box is taken over the central 94% of changed pixels in each
+        axis, so a few noisy pixels (leaves, compression) elsewhere in the
+        frame don't drag it off the subject.
+        """
         w, h = self._MOTION_W, self._MOTION_H
-        n = 0
-        x0 = y0 = 10**6
-        x1 = y1 = -1
+        xs, ys = [], []
         for i in range(w * h):
             if abs(before[i] - after[i]) > thresh:
-                n += 1
-                x, y = i % w, i // w
-                if x < x0: x0 = x
-                if x > x1: x1 = x
-                if y < y0: y0 = y
-                if y > y1: y1 = y
-        return n, (x0, y0, x1, y1)
+                xs.append(i % w)
+                ys.append(i // w)
+        n = len(xs)
+        if not n:
+            return 0, (0, 0, -1, -1)
+        xs.sort()
+        ys.sort()
+        lo, hi = int(n * 0.03), max(int(n * 0.97) - 1, int(n * 0.03))
+        return n, (xs[lo], ys[lo], xs[hi], ys[hi])
 
     async def _grab_frame(self, dest: Path) -> bool:
         """Copy the current snapshot (URL or tee file) to dest."""
@@ -524,7 +529,7 @@ class RTSPCam(UnifiCamBase):
             if best_n < 0:
                 return None, None
             w, h = self._MOTION_W, self._MOTION_H
-            if best_n < 0.004 * w * h:  # < 0.4% of pixels changed: noise
+            if best_n < 0.001 * w * h:  # < 0.1% of pixels changed: noise
                 self.logger.info(f"Motion thumbnail: nothing moved ({best_n} px), using centre")
                 return best, None
             x0, y0, x1, y1 = best_box
