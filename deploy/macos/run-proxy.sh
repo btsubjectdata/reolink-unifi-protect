@@ -88,6 +88,9 @@ case "${CAM_TYPE:-rtsp}" in
       # changed area (THUMBNAIL_CROP=frame for the whole frame letterboxed instead)
       --thumbnail-crop "${THUMBNAIL_CROP:-motion}"
       --thumbnail-delay "${THUMBNAIL_DELAY:-5}"
+      # the camera's ONVIF push arrives a few seconds after it saw the subject:
+      # start the event that much earlier so the clip includes the walk-in
+      --event-lead "${EVENT_LEAD:-3}"
     )
     ;;
 esac

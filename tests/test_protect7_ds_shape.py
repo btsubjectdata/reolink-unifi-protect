@@ -123,3 +123,10 @@ def test_motion_box_ignores_small_noise(cam):
     after = bytes([112] * (w * h))  # 12 levels of lighting change: under threshold
     n, _ = cam._motion_box(before, after)
     assert n == 0
+
+
+def test_event_lead_backdates_first_shown(cam):
+    cam.args.event_lead = 2.5
+    d = cam.build_smart_descriptor("person", [0, 0, 10, 10], 0.9, 11)
+    assert 2400 <= d["timestamp"] - d["firstShownTimeMs"] <= 2600
+    assert d["duration"] == d["timestamp"] - d["firstShownTimeMs"]

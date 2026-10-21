@@ -183,6 +183,15 @@ class UnifiCamBase(metaclass=ABCMeta):
             default="video3",
             help="Stream whose ffmpeg writes --snapshot-tee (video1/video2/video3)",
         )
+        parser.add_argument(
+            "--event-lead",
+            default=0.0,
+            type=float,
+            help="Report each smart-detect event as having started this many"
+            " seconds before it reached the proxy, so the clip Protect"
+            " shows for the event includes the subject walking in (covers"
+            " the camera's own detection latency, e.g. ONVIF pushes)",
+        )
         # --- macOS: VideoToolbox instead of Intel QSV (reolink-unifi-protect
         # Mac mini install). Same flags, different ffmpeg encoder names.
         parser.add_argument(
@@ -360,16 +369,20 @@ class UnifiCamBase(metaclass=ABCMeta):
         descriptors: Optional[list] = None,
     ) -> None:
         if not self._motion_event_ts:
+            # --event-lead: the camera noticed the subject before its event
+            # reached us; backdate the start so the clip includes the walk-in.
+            lead = max(0.0, float(getattr(self.args, "event_lead", 0) or 0))
+            start_ts = time.time() - lead
             payload: dict[str, Any] = {
                 # Real wall/monotonic clocks: Protect timestamps each
                 # descriptor sample off clockBestWall when persisting
                 # smartDetectTracks — zeros make every sample land at
                 # epoch 0, the track is discarded, and the event
                 # thumbnail cropper has no box to zoom to.
-                "clockBestMonotonic": int(self.get_uptime()),
-                "clockBestWall": int(round(time.time() * 1000)),
-                "clockMonotonic": int(self.get_uptime()),
-                "clockStream": int(self.get_uptime()),
+                "clockBestMonotonic": int(self.get_uptime() - lead),
+                "clockBestWall": int(round(start_ts * 1000)),
+                "clockMonotonic": int(self.get_uptime() - lead),
+                "clockStream": int(self.get_uptime() - lead),
                 "clockStreamRate": 1000,
                 "clockWall": int(round(time.time() * 1000)),
                 "edgeType": "start",
@@ -433,7 +446,7 @@ class UnifiCamBase(metaclass=ABCMeta):
                     payload=payload,
                 ),
             )
-            self._motion_event_ts = time.time()
+            self._motion_event_ts = start_ts
             self._motion_object_type = object_type
 
             # Capture snapshot at beginning of motion event for thumbnail.
@@ -471,7 +484,8 @@ class UnifiCamBase(metaclass=ABCMeta):
         if first_seen is None:
             first_seen = self._ds_first_seen = {}
         now_ms = int(round(time.time() * 1000))
-        shown_ms = first_seen.setdefault(int(tracker_id), now_ms)
+        lead_ms = int(max(0.0, float(getattr(self.args, "event_lead", 0) or 0)) * 1000)
+        shown_ms = first_seen.setdefault(int(tracker_id), now_ms - lead_ms)
         return {
             "trackerID": int(tracker_id),
             "id": None,
