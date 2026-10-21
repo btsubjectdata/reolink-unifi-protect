@@ -49,7 +49,22 @@ def parse_args():
     parser.add_argument(
         "--token", "-t", required=False, default=None, help="Adoption token"
     )
-    parser.add_argument("--mac", "-m", default="AABBCCDDEEFF", help="MAC address")
+    parser.add_argument(
+        "--mac",
+        "-m",
+        default="AABBCCDDEEFF",
+        help="MAC address of the virtual camera (12 hex digits; colons are stripped)",
+    )
+    parser.add_argument(
+        "--adopted",
+        action="store_true",
+        help=(
+            "Camera is already adopted in Protect: connect to /camera/1.0/ws "
+            "without an adoption token, like a real camera does after adoption. "
+            "No NVR login or --token needed. (Protect 7.x routes smart detections "
+            "more reliably this way.)"
+        ),
+    )
     parser.add_argument(
         "--ip",
         "-i",
@@ -178,12 +193,21 @@ async def run():
             logger.error(f"{binary} is not installed")
             sys.exit(1)
 
-    if not args.token:
-        args.token = await generate_token(args, logger)
-
-    if not args.token:
-        logger.error("A valid token is required")
+    # Protect keys cameras on the bare 12-hex-digit form; its 7.x Device Service
+    # compares the `camera-mac` header literally, so normalise here once.
+    args.mac = args.mac.replace(":", "").replace("-", "").upper()
+    if len(args.mac) != 12:
+        logger.error(f"--mac must be 12 hex digits, got {args.mac!r}")
         sys.exit(1)
+
+    if args.adopted:
+        args.token = args.token or ""
+    else:
+        if not args.token:
+            args.token = await generate_token(args, logger)
+        if not args.token:
+            logger.error("A valid token is required (or pass --adopted once the camera is in Protect)")
+            sys.exit(1)
 
     cam = klass(args, logger)
     c = Core(args, cam, core_logger)

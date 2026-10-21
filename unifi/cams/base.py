@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import atexit
+import datetime
 import json
 import logging
 import os
@@ -171,6 +172,25 @@ class UnifiCamBase(metaclass=ABCMeta):
             default="1M",
             help="Bitrate for --lo-h265-transcode",
         )
+        # --- snapshot tee: JPEG from a live stream's ffmpeg, no extra RTSP session
+        parser.add_argument(
+            "--snapshot-tee",
+            default=None,
+            help="Write a 1 fps JPEG here from --snapshot-tee-stream's ffmpeg",
+        )
+        parser.add_argument(
+            "--snapshot-tee-stream",
+            default="video3",
+            help="Stream whose ffmpeg writes --snapshot-tee (video1/video2/video3)",
+        )
+        # --- macOS: VideoToolbox instead of Intel QSV (reolink-unifi-protect
+        # Mac mini install). Same flags, different ffmpeg encoder names.
+        parser.add_argument(
+            "--transcode-backend",
+            choices=("qsv", "videotoolbox"),
+            default="qsv",
+            help="Hardware backend for --hw-transcode / --lo-h265-transcode",
+        )
 
     async def _run(self, ws) -> None:
         self._session = ws
@@ -252,12 +272,29 @@ class UnifiCamBase(metaclass=ABCMeta):
             # 8+s of video per event thumb (10-25s, queueing) — the app
             # then falls back to a stale full-frame snapshot.
             lo_fps = getattr(self.args, "lo_fps", None) or 30
+            if getattr(self.args, "transcode_backend", "qsv") == "videotoolbox":
+                # Apple media engine. -realtime 1 keeps the encoder from
+                # buffering; -tag:v hvc1 is harmless for FLV but keeps the
+                # SPS/PPS extradata in the layout hevc_flv expects.
+                return (
+                    f"-c:v hevc_videotoolbox -realtime 1"
+                    f" -b:v {self.args.lo_transcode_bitrate}"
+                    f" -g {lo_fps} -c:a copy"
+                )
             return (
                 f"-c:v hevc_qsv -b:v {self.args.lo_transcode_bitrate}"
                 f" -g {lo_fps} -c:a copy"
             )
         # Post-input (encode) slot: scale + encode H.264, both on the iGPU.
         if self._hw_transcoding(stream_index):
+            if getattr(self.args, "transcode_backend", "qsv") == "videotoolbox":
+                return (
+                    f'-vf "scale={self.args.transcode_width}'
+                    f':{self.args.transcode_height}"'
+                    f" -c:v h264_videotoolbox -realtime 1"
+                    f" -b:v {self.args.transcode_bitrate}"
+                    " -ar 32000 -ac 1 -codec:a aac -b:a 32k"
+                )
             return (
                 f'-vf "vpp_qsv=w={self.args.transcode_width}'
                 f':h={self.args.transcode_height}"'
@@ -382,6 +419,8 @@ class UnifiCamBase(metaclass=ABCMeta):
                     }
                 )
 
+            if object_type:
+                self._ds_payload_fill(payload)
             self.logger.info(
                 f"Triggering motion start (idx: {self._motion_event_id})"
                 + f" for {object_type.value}"
@@ -428,19 +467,67 @@ class UnifiCamBase(metaclass=ABCMeta):
         # schema; coord is 0-1000 [x, y, w, h]. tracker_id must be
         # STABLE per physical object across reports or the UI stacks a
         # new box per update instead of moving one.
+        first_seen = getattr(self, "_ds_first_seen", None)
+        if first_seen is None:
+            first_seen = self._ds_first_seen = {}
+        now_ms = int(round(time.time() * 1000))
+        shown_ms = first_seen.setdefault(int(tracker_id), now_ms)
         return {
             "trackerID": int(tracker_id),
+            "id": None,
             "name": object_type,
             "confidenceLevel": int(round(confidence * 100)),
+            "confidence": int(round(confidence * 100)),
             "coord": [int(c) for c in coord],
+            "coord3d": [-1, -1],
             "objectType": object_type,
             "zones": [int(z) for z in zones] if zones else [1],
             "lines": [],
             "loiterZones": [],
+            "intelligenceZones": [],
+            "secondLensZones": [],
             "stationary": False,
-            "attributes": {},
-            "coord3d": [],
+            # null, not {}: ds parses a non-null value as a full attribute struct
+            "attributes": None,
+            "timestamp": now_ms,
+            "firstShownTimeMs": shown_ms,
+            "idleSinceTimeMs": 0,
+            "duration": max(1, now_ms - shown_ms),
+            "depth": None,
+            "speed": None,
+            "licensePlate": None,
+            "matchedId": None,
+            # remaining fields of ds's CameraSmartDetectDescriptor, as a real
+            # G4/G5 sends them (traced on Protect 7.3.70)
+            "boxColor": {"person": "red", "vehicle": "cyan"}.get(object_type, "yellow"),
+            "tag": "",
+            "associatedFaceTrackerID": None,
+            "faceEmbed": None,
         }
+
+    def _ds_payload_fill(self, payload: dict) -> None:
+        """Fill the keys Protect 7.x's Device Service requires on a
+        smart-detect payload (see patches/apply_ds_payload.py)."""
+        for zs in payload.get("zonesStatus", {}).values():
+            if isinstance(zs, dict):
+                zs.setdefault("level", 0)
+        payload.setdefault("descriptors", [])
+        # null like a real camera: a non-null linesStatus makes ds file the
+        # event as a line-crossing (smartDetectLine) instead of a zone event
+        payload.setdefault("linesStatus", None)
+        payload.setdefault("loiterZonesStatus", None)
+        payload.setdefault("intelligenceZonesStatus", None)
+        payload.setdefault("tamperStatus", None)
+        payload.setdefault("smartDetectSnapshots", [])
+        payload.setdefault("attributesForTracks", None)
+        payload.setdefault("trackerIDAttrMap", None)
+        payload.setdefault("smartDetectSnapshot", "")
+        payload.setdefault("smartDetectSnapshotFullFoV", "")
+        payload.setdefault("smartDetectSnapshotFullFoVHeight", 0)
+        payload.setdefault("smartDetectSnapshotFullFoVWidth", 0)
+        payload.setdefault("smartDetectHeatmap", "")
+        if payload.get("edgeType") == "leave":
+            self._ds_first_seen = {}
 
     async def trigger_motion_update(self, descriptors: list) -> None:
         """Stream a `moving` track update for an ongoing smart event.
@@ -468,6 +555,7 @@ class UnifiCamBase(metaclass=ABCMeta):
             "displayTimeoutMSec": self.SMART_DISPLAY_TIMEOUT_MS,
             "descriptors": descriptors,
         }
+        self._ds_payload_fill(payload)
         await self.send(self.gen_response("EventSmartDetect", payload=payload))
 
     async def trigger_motion_stop(self) -> None:
@@ -513,6 +601,8 @@ class UnifiCamBase(metaclass=ABCMeta):
                         )
                     )
                 self._smart_snapshots = []
+            if motion_object_type:
+                self._ds_payload_fill(payload)
             self.logger.info(
                 f"Triggering motion stop (idx: {self._motion_event_id})"
                 + f" for {motion_object_type.value}"
@@ -1347,6 +1437,9 @@ class UnifiCamBase(metaclass=ABCMeta):
     ) -> AVClientResponse:
         if not payload:
             payload = {}
+        # statusCode/timeStamp: required by Protect 7.x's Device Service
+        # (ds) to parse the envelope at all; see patches/apply_envelope.py
+        now = datetime.datetime.now(datetime.timezone.utc)
         return {
             "from": "ubnt_avclient",
             "functionName": name,
@@ -1354,6 +1447,9 @@ class UnifiCamBase(metaclass=ABCMeta):
             "messageId": self.gen_msg_id(),
             "payload": payload,
             "responseExpected": False,
+            "statusCode": 0,
+            "timeStamp": now.strftime("%Y-%m-%dT%H:%M:%S.")
+            + f"{now.microsecond // 1000:03d}+00:00",
             "to": "UniFiVideo",
         }
 
@@ -1364,7 +1460,7 @@ class UnifiCamBase(metaclass=ABCMeta):
         self.logger.debug(f"Sending: {msg}")
         ws = self._session
         if ws:
-            await ws.send(json.dumps(msg).encode())
+            await ws.send(json.dumps(msg))  # str -> text frame (DS ignores binary)
 
     async def process(self, msg: bytes) -> bool:
         m = json.loads(msg)
@@ -1472,7 +1568,10 @@ class UnifiCamBase(metaclass=ABCMeta):
             # if this stream ever carries H.264 (e.g. a sub-stream fallback),
             # forcing the HEVC decoder fails with "Function not implemented".
             # `-hwaccel qsv` alone lets ffmpeg pick the right QSV decoder.
-            prefix = f"-hwaccel qsv -qsv_device {self.args.hw_device} "
+            if getattr(self.args, "transcode_backend", "qsv") == "videotoolbox":
+                prefix = "-hwaccel videotoolbox "
+            else:
+                prefix = f"-hwaccel qsv -qsv_device {self.args.hw_device} "
         return prefix + " ".join(base_args)
 
     async def start_video_stream(
@@ -1489,12 +1588,22 @@ class UnifiCamBase(metaclass=ABCMeta):
             hevc_filter = ""
             if self._emits_h265(stream_index):
                 hevc_filter = f"{sys.executable} -m unifi.hevc_flv | "
+            tee = ""
+            if getattr(self.args, "snapshot_tee", None) and stream_index == getattr(
+                self.args, "snapshot_tee_stream", "video3"
+            ):
+                # Second output on the same ffmpeg: decode the video once per
+                # second into a JPEG (-update 1 rewrites the file in place).
+                tee = (
+                    f' -map 0:v:0 -r 1 -update 1 -q:v 4 -f image2'
+                    f' "{self.args.snapshot_tee}"'
+                )
             cmd = (
                 "ffmpeg -nostdin -loglevel error -y"
                 f" {self.get_base_ffmpeg_args(stream_index)} -rtsp_transport"
                 f' {self.args.rtsp_transport} -i "{source}"'
                 f" {self.get_extra_ffmpeg_args(stream_index)} -metadata"
-                f" streamName={stream_name} -f flv - | {hevc_filter}{sys.executable} -m"
+                f" streamName={stream_name} -f flv -{tee} | {hevc_filter}{sys.executable} -m"
                 " unifi.clock_sync"
                 f" {'--write-timestamps' if self._needs_flv_timestamps else ''} | nc"
                 f" {destination[0]} {destination[1]}"

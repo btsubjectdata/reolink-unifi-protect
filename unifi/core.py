@@ -1,4 +1,5 @@
 import asyncio
+import os
 import ssl
 import uuid
 
@@ -46,7 +47,11 @@ class Core(object):
         return headers
 
     async def run(self) -> None:
-        uri = "wss://{}:7442/camera/1.0/ws?token={}".format(self.host, self.token)
+        if getattr(self.args, "adopted", False) or os.environ.get("UCP_NO_TOKEN") == "1":
+            # already adopted: connect like a real camera does after adoption
+            uri = "wss://{}:7442/camera/1.0/ws".format(self.host)
+        else:
+            uri = "wss://{}:7442/camera/1.0/ws?token={}".format(self.host, self.token)
         has_connected = False
 
         @backoff.on_predicate(
@@ -61,7 +66,11 @@ class Core(object):
             nonlocal has_connected
             self.logger.info(
                 "Creating ws connection to"
-                f" wss://{self.host}:7442/camera/1.0/ws?token={self.token[:4]}…"
+                + (
+                    f" wss://{self.host}:7442/camera/1.0/ws (no token)"
+                    if getattr(self.args, "adopted", False) or os.environ.get("UCP_NO_TOKEN") == "1"
+                    else f" wss://{self.host}:7442/camera/1.0/ws?token={self.token[:4]}…"
+                )
             )
             try:
                 # Rebuilt per attempt: camera-firmware must follow a
