@@ -56,8 +56,10 @@ openssl req -x509 -nodes -newkey rsa:2048 -keyout client.key -out client.crt -da
 3. **Stop the Mac first** (`Stop.command`) — two bridges with the same MAC fight over the
    camera and the NVR. Then `./bridge.sh up`. Protect sees the "same camera" come back from a
    new IP; live view and events resume, history intact. Delete the config copy in `/tmp`.
-4. On the Mac, when happy: `Status.command` should show nothing running; remove the launchd
-   agents with the kit's `Stop.command` + delete `~/Library/LaunchAgents/io.github.reolink-unifi-protect.*`.
+4. On the Mac, when happy: unload the agents and move their plists aside so they don't return at
+   the next login (`launchctl bootout gui/$(id -u)/<label>` for each, then move
+   `~/Library/LaunchAgents/*reolink-unifi-protect*.plist` into a `retired/` folder). Re-running the
+   kit's `InstallService.command` brings the Mac back if ever needed.
 
 ## 3. Run
 
@@ -94,5 +96,7 @@ the current G5 Pro release from
 if detections stop, `grep -i "not expected\|Failed to parse" /volume/*/.srv/ds/logs/ds.log` on
 the NVR names the field that changed.
 
-*Prepared ahead of hardware: the compose and flag assembly are verified against the proxy;
-the arm64 image build and first run are pending.*
+*Verified on a Pi 4 B (4 GB, Raspberry Pi OS desktop 64-bit, Debian 13) with two Tapo C720s moved
+over from the macOS kit without re-adoption: ~1.5 load, 50 °C, ~1 GB RAM. Over a WiFi bridge the
+weaker camera's sub stream showed RTP loss and restarted every ~30 s; on the switch, zero restarts.
+Wired is not optional.*
