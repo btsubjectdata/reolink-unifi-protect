@@ -28,6 +28,7 @@ mkdir -p "$RUNTIME" "$LOGDIR"
   echo "hls: no"
   echo "webrtc: no"
   echo "srt: no"
+  echo "moq: no"
   echo "paths:"
   n=0
   for cam in $(list_cameras); do
