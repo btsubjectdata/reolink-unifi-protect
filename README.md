@@ -58,7 +58,8 @@ running natively on a **Mac** (no Docker):
 - **`deploy/pi/`** — the Tapo/ONVIF stack for a Raspberry Pi 4/5 or any small Linux box (H.264
   cameras, copy-only): one compose for many cameras, scratch in RAM so an SD card is never written,
   `import-mac-config.sh` to move cameras over from the macOS kit without re-adopting. Verified on a
-  Pi 4 with two Tapo C720s.
+  Pi 4 with two Tapo C720s. **Start at [`deploy/pi/INSTALL.md`](deploy/pi/INSTALL.md)** for a
+  step-by-step guide that assumes nothing.
 - **`deploy/n100/`** — the Reolink full-quality path on a small Intel box (N95/N100/Core-U): 5K H.265
   passthrough, sub stream to HEVC on Quick Sync, boxes + push events + spotlight, one container;
   `probe.sh` reads the camera's real stream specs into `.env`. Assembled from the verified pieces

@@ -1,5 +1,8 @@
 # ONVIF cameras (Tapo etc.) → UniFi Protect on a Raspberry Pi 4/5
 
+> New to this? Follow **[INSTALL.md](INSTALL.md)** — every step from flashing the card to the
+> first Person event, with nothing assumed. This page is the short reference.
+
 The macOS kit's job on a Pi: TP-Link Tapo (or any ONVIF camera with on-board person /
 vehicle / animal detection) into Protect as a first-class camera with smart detections, no AI
 Port. H.264 cameras only — everything is `-c:v copy`, so a Pi 4 runs two 2K cameras at
