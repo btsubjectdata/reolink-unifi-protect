@@ -42,6 +42,10 @@ running natively on a **Mac** (no Docker):
 - **ONVIF event sidecar** (`deploy/macos/onvif_sidecar.py`) — person / vehicle / animal
   detections from any ONVIF camera's own analytics (Tapo, and most cameras with on-board
   AI), via push notifications. Event-level boxes, no moving tracks.
+- **Event thumbnails and clip timing for cameras without box positions** — `--thumbnail-crop
+  motion` samples frames after the event, keeps the one that changed most and zooms on the
+  changed area; `--event-lead` backdates the event start so the clip shows the walk-in;
+  `--ai-clear-after` and the sidecar's `--hold` set the clip tail.
 - **`--transcode-backend videotoolbox`** — the HEVC sub-stream transcode on Apple silicon /
   Intel Macs instead of Intel QSV.
 - **`--snapshot-tee`** — snapshots written by a live stream's ffmpeg, for cameras that cap

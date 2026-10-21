@@ -81,7 +81,7 @@ services:
       SNAPSHOT_PORT: ${SNAPSHOT_PORT:-8999}
       AI_MIN_CONFIDENCE: ${AI_MIN_CONFIDENCE:-0.5}
       AI_CLASSES: ${AI_CLASSES:-person,vehicle,animal}
-      FFMPEG_ARGS: ${FFMPEG_ARGS:--c:v copy -ar 32000 -ac 1 -codec:a aac -b:a 32k}
+      FFMPEG_ARGS: ${FFMPEG_ARGS:--c:v copy -ar 16000 -ac 1 -codec:a aac -b:a 32k}
       HI_CODEC: ${HI_CODEC:-h264}
       HI_WIDTH: ${HI_WIDTH:-2560}
       HI_HEIGHT: ${HI_HEIGHT:-1440}
@@ -109,7 +109,8 @@ services:
           --snapshot-tee /snapshots/cam.jpg --snapshot-tee-stream video3 \
           --ai-sink-port "$$AI_SINK_PORT" --ai-min-movement 0 \
           --ai-min-confidence "$$AI_MIN_CONFIDENCE" --ai-classes "$$AI_CLASSES" \
-          --thumbnail-crop frame --thumbnail-delay 1.5
+          --thumbnail-crop "$${THUMBNAIL_CROP:-motion}" --thumbnail-delay "$${THUMBNAIL_DELAY:-5}" \
+          --event-lead "$${EVENT_LEAD:-5}" --ai-clear-after "$${AI_CLEAR_AFTER:-1}"
 
   sidecar:
     build:
@@ -138,6 +139,8 @@ services:
       - "${PUSH_PORT:-9999}"
       - --snapshot-port
       - "${SNAPSHOT_PORT:-8999}"
+      - --hold
+      - "${ONVIF_HOLD:-3}"
       - --snapshot-file
       - /snapshots/cam.jpg
 

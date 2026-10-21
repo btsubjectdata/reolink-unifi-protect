@@ -46,7 +46,7 @@ ARGS+=(
   rtsp
   -s "$RTSP_BASE/$HI_PATH" "$RTSP_BASE/$LO_PATH"
   --rtsp-transport "${RTSP_TRANSPORT:-tcp}"
-  --ffmpeg-args "${FFMPEG_ARGS:--c:v copy -ar 32000 -ac 1 -codec:a aac -b:a 32k}"
+  --ffmpeg-args "${FFMPEG_ARGS:--c:v copy -ar 16000 -ac 1 -codec:a aac -b:a 32k}"
   --hi-codec "$HI_CODEC" --hi-width "$HI_WIDTH" --hi-height "$HI_HEIGHT" --hi-fps "$HI_FPS"
   --lo-codec "$LO_CODEC" --lo-width "$LO_WIDTH" --lo-height "$LO_HEIGHT" --lo-fps "$LO_FPS"
   --transcode-backend videotoolbox
