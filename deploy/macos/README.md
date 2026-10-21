@@ -44,7 +44,6 @@ Secrets never sit in the synced folder. Deleting `~/reolink-unifi-protect` and r
 | `InstallService.command` | Installs the RTSP relay agent plus one proxy (+ sidecar) agent per camera (start at login, restart on crash). Re-run after adding a camera. |
 | `Start.command` / `Stop.command` / `Status.command` / `Logs.command` | Day-to-day control. |
 | `Update.command` | Stop → pull upstream → re-patch → reinstall → restart. |
-| `RemoteShell.command` | Optional helper: runs scripts dropped into `agent/queue/` and writes output to `agent/out/` (used for remote support). Close the window to stop. |
 
 `run-relay.sh` (mediamtx, one for all cameras), `run-proxy.sh <camera>` and
 `run-sidecar.sh <camera>` are what the services actually execute
@@ -82,7 +81,7 @@ Full walkthrough with the Protect-side clicks is in **SETUP.md**. The short vers
 
 ## Things that bite
 
-- **`CAM_MAC` is 12 bare hex digits** (`AABBCC001274`), never colon-separated. Protect 7's
+- **`CAM_MAC` is 12 bare hex digits** (`AABBCC000001`), never colon-separated. Protect 7's
   Device Service keys cameras on the literal string, and the proxy's hello builds `hwaddr`
   by slicing two characters at a time.
 - **Protect caches model/codec/resolution at adoption.** Any change to `HI_*`, `LO_*`,
