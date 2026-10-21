@@ -44,7 +44,7 @@ Generate a client certificate once:
 
 ```sh
 openssl req -x509 -nodes -newkey rsa:2048 -keyout client.key -out client.crt -days 3650 \
-  -subj "/C=US/ST=TX/L=Home/O=bridge/CN=bridge" && cat client.key client.crt > client.pem && chmod 600 client.pem
+  -subj "/CN=unifi-cam-proxy" && cat client.key client.crt > client.pem && chmod 600 client.pem
 ```
 
 **Moving from the Mac** (keeps the cameras in Protect, no re-adoption):

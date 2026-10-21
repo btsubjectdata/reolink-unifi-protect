@@ -61,7 +61,7 @@ again, so get them from the probe, not the spec sheet.
 ```sh
 cp .env.example .env && nano .env                  # fill in; chmod 600 .env
 openssl req -x509 -nodes -newkey rsa:2048 -keyout client.key -out client.crt -days 3650 \
-  -subj "/C=US/ST=TX/L=Home/O=bridge/CN=bridge" && cat client.key client.crt > client.pem
+  -subj "/CN=unifi-cam-proxy" && cat client.key client.crt > client.pem
 ```
 
 `NVR_USER` / `NVR_PASS` is a **local** Protect admin made for the bridge (Protect → Settings →

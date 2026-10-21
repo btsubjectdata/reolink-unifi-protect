@@ -1,7 +1,5 @@
-# VAAPI-enabled unifi-cam-proxy for the Steegers house.
-#
-# Hardware: UGREEN NAS, Intel Core i5-1235U (Iris Xe iGPU), Unraid 7.2.3,
-# /dev/dri/renderD128 exposed. Upstream's published image is Alpine 3.10 with
+# VAAPI/QSV-enabled unifi-cam-proxy for Intel iGPU hosts (NAS, N100-class mini PC, any
+# Linux box exposing /dev/dri/renderD128). Upstream's published image is Alpine 3.10 with
 # an ffmpeg that has VAAPI encoders compiled in but NO Intel driver, so VAAPI
 # cannot initialize there. This image builds on Ubuntu 24.04 (glibc): its
 # ffmpeg 6.1 can mux HEVC into FLV ("enhanced FLV"), which the current
@@ -9,7 +7,7 @@
 # keep the QSV fallback (--hw-transcode in unifi/cams/base.py) working if
 # Protect refuses the passthrough stream.
 #
-# Build (on the NAS, where the iGPU is):
+# Build (on the host that has the iGPU):
 #   docker build -f Dockerfile.vaapi -t unifi-cam-proxy:vaapi .
 # Node stage: supplies the `node` binary and the AI box sidecar's installed dependencies for
 # `--ai-sidecar` (the proxy runs it as a subprocess; see deploy/ai-sidecar and docs/PROTECT-7.3.md).

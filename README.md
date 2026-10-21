@@ -55,16 +55,16 @@ running natively on a **Mac** (no Docker):
   Intel Macs instead of Intel QSV.
 - **`--snapshot-tee`** — snapshots written by a live stream's ffmpeg, for cameras that cap
   RTSP sessions (Tapo allows two).
-- **`deploy/pi/`** — the Tapo/ONVIF stack for a Raspberry Pi 4/5 (H.264 cameras, copy-only): one
-  compose for many cameras, scratch in RAM so the SD card is never written, `import-mac-config.sh`
-  to move the macOS kit's cameras over without re-adopting. *Prepared ahead of hardware.*
+- **`deploy/pi/`** — the Tapo/ONVIF stack for a Raspberry Pi 4/5 or any small Linux box (H.264
+  cameras, copy-only): one compose for many cameras, scratch in RAM so an SD card is never written,
+  `import-mac-config.sh` to move cameras over from the macOS kit without re-adopting. Verified on a
+  Pi 4 with two Tapo C720s.
 - **`deploy/n100/`** — the Reolink full-quality path on a small Intel box (N95/N100/Core-U): 5K H.265
-  passthrough, sub stream to HEVC on Quick Sync, boxes + push events + spotlight, one container.
-  Written for a Reolink Elite Floodlight WiFi at a second site; `probe.sh` reads the camera's real
-  stream specs. *Prepared ahead of hardware — first real run pending.*
-- **Docker stack for ONVIF cameras** ([`deploy/onvif/`](deploy/onvif)) — proxy + ONVIF sidecar +
-  mediamtx relay in one `docker compose up`, for any Docker host. *Untested so far* — same
-  components as the Mac kit, but not yet run as containers; feedback welcome. The existing Reolink
+  passthrough, sub stream to HEVC on Quick Sync, boxes + push events + spotlight, one container;
+  `probe.sh` reads the camera's real stream specs into `.env`. Assembled from the verified pieces
+  above for a Reolink Elite Floodlight WiFi; *not yet run end to end — feedback welcome.*
+- **Docker stack for ONVIF cameras** ([`deploy/onvif/`](deploy/onvif)) — the single-camera
+  predecessor of `deploy/pi`, kept for reference; use `deploy/pi` on any Docker host. The existing Reolink
   [`deploy/docker-compose.yml`](deploy/docker-compose.yml) keeps working and gets the Protect 7
   fixes for free (they are in the source, not in the deploy kits).
 - **A macOS deploy kit** ([`deploy/macos/`](deploy/macos)) — double-click `.command`
