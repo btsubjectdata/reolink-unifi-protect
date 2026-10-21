@@ -83,6 +83,10 @@ case "${CAM_TYPE:-rtsp}" in
       --ai-min-movement 0
       --ai-min-confidence "${AI_MIN_CONFIDENCE:-0.5}"
       --ai-classes "${AI_CLASSES:-person,vehicle,animal}"
+      # ONVIF events carry no position, so the event thumbnail is the whole
+      # frame (letterboxed square) grabbed a moment into the event
+      --thumbnail-crop "${THUMBNAIL_CROP:-frame}"
+      --thumbnail-delay "${THUMBNAIL_DELAY:-1.5}"
     )
     ;;
 esac

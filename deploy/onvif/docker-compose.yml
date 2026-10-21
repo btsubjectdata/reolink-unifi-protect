@@ -108,7 +108,8 @@ services:
           --snapshot-url "http://127.0.0.1:$$SNAPSHOT_PORT/snapshot.jpg" \
           --snapshot-tee /snapshots/cam.jpg --snapshot-tee-stream video3 \
           --ai-sink-port "$$AI_SINK_PORT" --ai-min-movement 0 \
-          --ai-min-confidence "$$AI_MIN_CONFIDENCE" --ai-classes "$$AI_CLASSES"
+          --ai-min-confidence "$$AI_MIN_CONFIDENCE" --ai-classes "$$AI_CLASSES" \
+          --thumbnail-crop frame --thumbnail-delay 1.5
 
   sidecar:
     build:

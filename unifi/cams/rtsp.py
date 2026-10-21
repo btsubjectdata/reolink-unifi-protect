@@ -116,6 +116,22 @@ class RTSPCam(UnifiCamBase):
             " doesn't count as motion (0 = use --ai-min-movement only)",
         )
         parser.add_argument(
+            "--thumbnail-crop",
+            choices=["object", "frame"],
+            default="object",
+            help="Event thumbnail: 'object' = square crop around the detection"
+            " box; 'frame' = the whole frame letterboxed into a square, for"
+            " sources whose detections carry no real position (e.g. ONVIF"
+            " event-level detections, which report a fixed box)",
+        )
+        parser.add_argument(
+            "--thumbnail-delay",
+            default=1.0,
+            type=float,
+            help="Seconds to wait after the detection before grabbing the"
+            " thumbnail frame, so the subject has entered the shot",
+        )
+        parser.add_argument(
             "--ai-movement-reports",
             default=2,
             type=int,
@@ -443,6 +459,9 @@ class RTSPCam(UnifiCamBase):
         """
         fetched = Path(self.snapshot_dir, f"crop_src_{tracker_id}.jpg")
         try:
+            delay = float(getattr(self.args, "thumbnail_delay", 0) or 0)
+            if delay > 0:
+                await asyncio.sleep(delay)
             if self.args.snapshot_url:
                 if not await self.fetch_to_file(self.args.snapshot_url, fetched):
                     return
@@ -470,6 +489,18 @@ class RTSPCam(UnifiCamBase):
             left = int(min(max(cx - side / 2, 0), fw - side))
             top = int(min(max(cy - side / 2, 0), fh - side))
 
+            if getattr(self.args, "thumbnail_crop", "object") == "frame":
+                # No real position: show the whole frame, letterboxed into
+                # the square Protect requires (isRealCropped).
+                side = int(min(fw, fh))
+                vf = (
+                    f"scale={side}:-2,pad={side}:{side}:(ow-iw)/2:(oh-ih)/2:black"
+                    if fw >= fh
+                    else f"scale=-2:{side},pad={side}:{side}:(ow-iw)/2:(oh-ih)/2:black"
+                )
+                left = top = 0
+            else:
+                vf = f"crop={side}:{side}:{left}:{top}"
             fname = f"detect_{tracker_id}.jpg"
             out = Path(self.snapshot_dir, fname)
             proc = await asyncio.create_subprocess_exec(
@@ -480,7 +511,7 @@ class RTSPCam(UnifiCamBase):
                 "-i",
                 str(src),
                 "-vf",
-                f"crop={side}:{side}:{left}:{top}",
+                vf,
                 str(out),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
