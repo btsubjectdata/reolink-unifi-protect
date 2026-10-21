@@ -1,5 +1,10 @@
 # ONVIF camera (Tapo etc.) → UniFi Protect with Docker
 
+> **Status: untested.** This stack is assembled from the same pieces that run in production on a
+> Mac ([`deploy/macos`](../macos) — proxy, `onvif_sidecar.py`, mediamtx relay), and the compose
+> file validates, but nobody has run these containers against a camera yet. Expect to fix
+> something small. Issues and PRs welcome.
+
 The Docker equivalent of [`deploy/macos`](../macos): the proxy, the ONVIF event sidecar and a
 mediamtx RTSP relay, one stack per camera. Read [`../macos/README.md`](../macos/README.md) for
 the why (Protect 7's Device Service, the two-session limit, the relay) — this file is only the
