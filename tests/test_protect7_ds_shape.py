@@ -120,6 +120,6 @@ def test_motion_box_ignores_stray_noise_pixels(cam):
 def test_motion_box_ignores_small_noise(cam):
     w, h = cam._MOTION_W, cam._MOTION_H
     before = bytes([100] * (w * h))
-    after = bytes([115] * (w * h))  # 15 levels of lighting change: under threshold
+    after = bytes([112] * (w * h))  # 12 levels of lighting change: under threshold
     n, _ = cam._motion_box(before, after)
     assert n == 0

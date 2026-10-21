@@ -470,7 +470,7 @@ class RTSPCam(UnifiCamBase):
         except Exception:
             return b""
 
-    def _motion_box(self, before: bytes, after: bytes, thresh: int = 25):
+    def _motion_box(self, before: bytes, after: bytes, thresh: int = 18):
         """Changed-pixel count and bounding box (grid units) between two frames.
 
         The box is taken over the central 94% of changed pixels in each

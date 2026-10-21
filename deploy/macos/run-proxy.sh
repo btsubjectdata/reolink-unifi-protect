@@ -87,7 +87,7 @@ case "${CAM_TYPE:-rtsp}" in
       # keep the one that changed most since the event fired and zoom on the
       # changed area (THUMBNAIL_CROP=frame for the whole frame letterboxed instead)
       --thumbnail-crop "${THUMBNAIL_CROP:-motion}"
-      --thumbnail-delay "${THUMBNAIL_DELAY:-3}"
+      --thumbnail-delay "${THUMBNAIL_DELAY:-5}"
     )
     ;;
 esac
