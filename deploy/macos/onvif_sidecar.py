@@ -294,7 +294,7 @@ def classify(topic: str, items: dict) -> list[tuple[str, bool]]:
 
 async def run(args: argparse.Namespace) -> None:
     active: dict[str, float] = {}  # class -> time it was last reported active
-    HOLD = 4.0  # seconds a class stays "present" after its last active notification
+    HOLD = args.hold  # seconds a class stays "present" after its last active notification
 
     async def poster(session: aiohttp.ClientSession):
         while True:
@@ -512,6 +512,7 @@ def main() -> None:
     p.add_argument("--password", required=True)
     p.add_argument("--sink", default="http://127.0.0.1:7999/detections")
     p.add_argument("--interval", type=float, default=0.4, help="seconds between sink posts")
+    p.add_argument("--hold", type=float, default=4.0, help="seconds a class stays present after its last 'true' notification (Tapo repeats them every 1-4 s; a 'false' clears it at once)")
     p.add_argument("--mode", choices=("push", "pull"), default="push", help="push: camera POSTs events to us (Tapo needs this); pull: ONVIF PullPoint")
     p.add_argument("--push-port", type=int, default=0, help="local port the camera posts events to (default: sink port + 2000)")
     p.add_argument("--push-host", default="", help="our IP as the camera should see it (default: auto)")

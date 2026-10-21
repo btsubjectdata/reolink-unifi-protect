@@ -117,6 +117,14 @@ class RTSPCam(UnifiCamBase):
             " doesn't count as motion (0 = use --ai-min-movement only)",
         )
         parser.add_argument(
+            "--ai-clear-after",
+            default=2.5,
+            type=float,
+            help="End the smart-detect event this many seconds after the"
+            " last box report from the AI sink (lower = shorter tail on"
+            " each clip, higher = fewer split events)",
+        )
+        parser.add_argument(
             "--thumbnail-crop",
             choices=["object", "frame", "motion"],
             default="object",
@@ -432,7 +440,7 @@ class RTSPCam(UnifiCamBase):
         elif (
             self._motion_event_ts
             and time.time() - getattr(self, "_sink_last_boxes_ts", 0)
-            > self.AI_CLEAR_AFTER_SEC
+            > float(getattr(self.args, "ai_clear_after", None) or self.AI_CLEAR_AFTER_SEC)
         ):
             self.logger.info("AI boxes clear — ending smart event")
             await self.trigger_motion_stop()

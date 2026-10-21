@@ -90,7 +90,10 @@ case "${CAM_TYPE:-rtsp}" in
       --thumbnail-delay "${THUMBNAIL_DELAY:-5}"
       # the camera's ONVIF push arrives a few seconds after it saw the subject:
       # start the event that much earlier so the clip includes the walk-in
-      --event-lead "${EVENT_LEAD:-3}"
+      --event-lead "${EVENT_LEAD:-5}"
+      # end the event soon after the camera stops reporting the subject (the sidecar
+      # already holds each class ONVIF_HOLD s past its last notification)
+      --ai-clear-after "${AI_CLEAR_AFTER:-1}"
     )
     ;;
 esac
