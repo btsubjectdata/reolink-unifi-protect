@@ -17,3 +17,4 @@ deploy/pi/cameras/*.env
 !deploy/pi/cameras/example-*.env
 deploy/*/client.pem
 deploy/*/.env
+deploy/pi/relay/

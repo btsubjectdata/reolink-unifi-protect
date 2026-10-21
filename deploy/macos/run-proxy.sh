@@ -106,7 +106,7 @@ if relay_on && ! nc -z -w 2 127.0.0.1 "$RELAY_PORT" 2>/dev/null; then
 fi
 # ffmpeg prints the full RTSP URL (credentials included) in its own error lines; the proxy only
 # redacts its own output. Mask everything on the way to the log.
-exec > >(sed -E -u 's#(rtsp://)[^@/[:space:]"]+@#\1***:***@#g') 2>&1
+exec > >(sed -E -u 's#(rtsp://)[^[:space:]"]*@#\1***:***@#g') 2>&1
 # The proxy starts each ffmpeg pipeline in its own process group, so killing the proxy alone
 # leaves ffmpeg streaming from the camera — and a Tapo only allows two RTSP sessions, so the
 # orphans lock the next start out ("Operation not permitted"). Run the proxy as a child and

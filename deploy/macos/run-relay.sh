@@ -49,5 +49,5 @@ mkdir -p "$RUNTIME" "$LOGDIR"
 chmod 600 "$RELAY_CFG"   # holds camera passwords
 echo "[$(date '+%F %T')] relay: $(grep -c '^  [a-z0-9_-]*-\(hi\|lo\):' "$RELAY_CFG") streams on 127.0.0.1:$RELAY_PORT ($(mask_url < "$RELAY_CFG" | grep -o 'rtsp://[^ ]*' | tr '\n' ' '))"
 # mediamtx echoes source URLs in a few messages; keep credentials out of the log
-exec > >(sed -E -u 's#(rtsp://)[^@/[:space:]"]+@#\1***:***@#g') 2>&1
+exec > >(sed -E -u 's#(rtsp://)[^[:space:]"]*@#\1***:***@#g') 2>&1
 exec "$MTX" "$RELAY_CFG"

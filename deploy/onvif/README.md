@@ -1,3 +1,8 @@
+> **Superseded by [`deploy/pi`](../pi)** — the same stack for any Linux host (x86 or ARM), with
+> one compose for several cameras, percent-encoded camera credentials (an e-mail address as the
+> camera user name breaks the URLs assembled here), RAM-backed scratch and a config importer.
+> This folder is kept for reference.
+
 # ONVIF camera (Tapo etc.) → UniFi Protect with Docker
 
 > **Status: untested.** This stack is assembled from the same pieces that run in production on a
