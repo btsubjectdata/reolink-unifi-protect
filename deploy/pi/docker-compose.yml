@@ -1,0 +1,108 @@
+# ONVIF cameras (TP-Link Tapo and friends) -> UniFi Protect on a Raspberry Pi 4/5 or any small
+# Linux box. One compose, one camera per *project*: bridge.sh runs it once per cameras/<name>.env
+# with its own ports. Same three services as deploy/onvif (relay / proxy / sidecar); differences:
+#   - Dockerfile here: Debian + prebuilt wheels, builds on arm64 without a toolchain
+#   - scratch (the once-a-second snapshot JPEG, crops) lives on /dev/shm, never on the SD card
+#   - SNAPSHOT_TEE_KEYFRAMES=1 decodes only keyframes for the snapshot (a Pi 4 can afford the
+#     full decode for two 720p sub streams, but this keeps it cool)
+services:
+  relay:
+    image: bluenviron/mediamtx:1.21.2
+    container_name: ${COMPOSE_PROJECT_NAME:-cam}-relay
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MTX_LOGLEVEL: info
+      MTX_API: "no"
+      MTX_METRICS: "no"
+      MTX_PLAYBACK: "no"
+      MTX_RTMP: "no"
+      MTX_HLS: "no"
+      MTX_WEBRTC: "no"
+      MTX_SRT: "no"
+      MTX_RTSPADDRESS: "127.0.0.1:${RELAY_PORT:-8554}"
+      MTX_RTSPTRANSPORTS: "tcp"
+      MTX_PATHS_HI_SOURCE: "rtsp://${CAM_USER}:${CAM_PASS}@${CAM_IP}:554/${HI_PATH:-stream1}"
+      MTX_PATHS_HI_RTSPTRANSPORT: "tcp"
+      MTX_PATHS_HI_SOURCEONDEMAND: "no"
+      MTX_PATHS_LO_SOURCE: "rtsp://${CAM_USER}:${CAM_PASS}@${CAM_IP}:554/${LO_PATH:-stream2}"
+      MTX_PATHS_LO_RTSPTRANSPORT: "tcp"
+      MTX_PATHS_LO_SOURCEONDEMAND: "no"
+    logging: &log
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
+
+  proxy:
+    build:
+      context: ../..
+      dockerfile: deploy/pi/Dockerfile
+    image: unifi-cam-proxy:pi
+    container_name: ${COMPOSE_PROJECT_NAME:-cam}-proxy
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [relay]
+    volumes:
+      - ./client.pem:/client.pem:ro
+      - /dev/shm/bridge-${COMPOSE_PROJECT_NAME:-cam}:/snapshots       # RAM: no SD-card wear
+      - type: tmpfs
+        target: /tmp
+        tmpfs: { size: 134217728 }
+    logging: *log
+    environment:
+      TZ: ${TZ:-UTC}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ -n "$${ADOPTION_TOKEN:-}" ]; then AUTH="--token $$ADOPTION_TOKEN"; else AUTH="--nvr-username $$NVR_USER --nvr-password $$NVR_PASS"; fi
+        [ "$${ADOPTED:-0}" = "1" ] && AUTH="$$AUTH --adopted"
+        i=0; until nc -z 127.0.0.1 "$${RELAY_PORT:-8554}" || [ $$i -ge 30 ]; do i=$$((i+1)); sleep 1; done
+        exec unifi-cam-proxy --host "$$NVR_IP" --cert /client.pem $$AUTH \
+          --mac "$$CAM_MAC" --ip "$$CAM_IP" --name "$$CAM_NAME" \
+          --model "$${MODEL:-UVC G5 Pro}" --sysid "$${SYSID:-0xa598}" --platform "$${PLATFORM:-sav837gw}" \
+          --fw-version "$${FW_VERSION:-5.5.31}" --fw-build "$${FW_BUILD:-92ebf37.260724.1639}" \
+          rtsp -s "rtsp://127.0.0.1:$${RELAY_PORT:-8554}/hi" "rtsp://127.0.0.1:$${RELAY_PORT:-8554}/lo" --rtsp-transport tcp \
+          --ffmpeg-args "$${FFMPEG_ARGS:--c:v copy -ar 16000 -ac 1 -codec:a aac -b:a 32k}" \
+          --hi-codec "$${HI_CODEC:-h264}" --hi-width "$${HI_WIDTH:-2560}" --hi-height "$${HI_HEIGHT:-1440}" --hi-fps "$${HI_FPS:-15}" \
+          --lo-codec "$${LO_CODEC:-h264}" --lo-width "$${LO_WIDTH:-1280}" --lo-height "$${LO_HEIGHT:-720}" --lo-fps "$${LO_FPS:-15}" \
+          --snapshot-url "http://127.0.0.1:$${SNAPSHOT_PORT:-8999}/snapshot.jpg" \
+          --snapshot-tee /snapshots/cam.jpg --snapshot-tee-stream video3 \
+          $${SNAPSHOT_TEE_KEYFRAMES:+--snapshot-tee-keyframes} \
+          --ai-sink-port "$${AI_SINK_PORT:-7999}" --ai-min-movement 0 \
+          --ai-min-confidence "$${AI_MIN_CONFIDENCE:-0.5}" --ai-classes "$${AI_CLASSES:-person,vehicle,animal}" \
+          --thumbnail-crop "$${THUMBNAIL_CROP:-motion}" --thumbnail-delay "$${THUMBNAIL_DELAY:-5}" \
+          --event-lead "$${EVENT_LEAD:-5}" --ai-clear-after "$${AI_CLEAR_AFTER:-1}" $${EXTRA_ARGS:-}
+    env_file:
+      - ${ENV_FILE:-.env}
+
+  sidecar:
+    build:
+      context: ..
+      dockerfile: onvif-sidecar/Dockerfile
+    image: onvif-sidecar:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-cam}-sidecar
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [proxy]
+    volumes:
+      - /dev/shm/bridge-${COMPOSE_PROJECT_NAME:-cam}:/snapshots:ro
+    logging: *log
+    command:
+      - --host
+      - "${CAM_IP}"
+      - --port
+      - "${ONVIF_PORT:-2020}"
+      - --user
+      - "${CAM_USER}"
+      - --password
+      - "${CAM_PASS}"
+      - --sink
+      - "http://127.0.0.1:${AI_SINK_PORT:-7999}/detections"
+      - --push-port
+      - "${PUSH_PORT:-9999}"
+      - --snapshot-port
+      - "${SNAPSHOT_PORT:-8999}"
+      - --hold
+      - "${ONVIF_HOLD:-3}"
+      - --snapshot-file
+      - /snapshots/cam.jpg

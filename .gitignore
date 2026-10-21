@@ -13,3 +13,7 @@ MANIFEST.in
 .vscode/settings.json
 .vscode/launch.json
 .venv/
+deploy/pi/cameras/*.env
+!deploy/pi/cameras/example-*.env
+deploy/*/client.pem
+deploy/*/.env

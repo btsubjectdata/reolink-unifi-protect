@@ -55,6 +55,9 @@ running natively on a **Mac** (no Docker):
   Intel Macs instead of Intel QSV.
 - **`--snapshot-tee`** — snapshots written by a live stream's ffmpeg, for cameras that cap
   RTSP sessions (Tapo allows two).
+- **`deploy/pi/`** — the Tapo/ONVIF stack for a Raspberry Pi 4/5 (H.264 cameras, copy-only): one
+  compose for many cameras, scratch in RAM so the SD card is never written, `import-mac-config.sh`
+  to move the macOS kit's cameras over without re-adopting. *Prepared ahead of hardware.*
 - **`deploy/n100/`** — the Reolink full-quality path on a small Intel box (N95/N100/Core-U): 5K H.265
   passthrough, sub stream to HEVC on Quick Sync, boxes + push events + spotlight, one container.
   Written for a Reolink Elite Floodlight WiFi at a second site; `probe.sh` reads the camera's real
@@ -213,6 +216,7 @@ The full, generated list is in [docs/FLAGS.md](docs/FLAGS.md); the main ones are
 | `--reolink-visitor-poll` | Fallback: poll `GetEvents` for the button instead of using push |
 | `--ai-sidecar`, `--ai-sidecar-profile`, `--ai-sidecar-always-on` | Run the bundled Baichuan box sidecar: events carry the camera's real moving detection boxes and per-object crops. On-demand by default (stream open only during detections). See [docs/PROTECT-7.3.md](docs/PROTECT-7.3.md) |
 | `--snapshot-url` | Snapshot via the camera's HTTP(S) API instead of a fourth RTSP session (Reolink WiFi cameras limit concurrent RTSP) |
+| `--snapshot-tee-keyframes` | (this fork) decode keyframes only for the tee: a few percent of CPU on a Pi, JPEG refreshes once per GOP |
 | `--snapshot-tee PATH`, `--snapshot-tee-stream` | (this fork) JPEG written once a second by a live stream's ffmpeg, for cameras that cap RTSP sessions |
 | `--transcode-backend {qsv,videotoolbox}` | (this fork) hardware backend for the H.265 sub-stream transcode; `videotoolbox` on macOS |
 | `--adopted` | (this fork) connect without an adoption token once the camera is in Protect |

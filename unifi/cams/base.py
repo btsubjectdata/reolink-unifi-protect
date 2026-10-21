@@ -210,6 +210,14 @@ class UnifiCamBase(metaclass=ABCMeta):
             help="Stream whose ffmpeg writes --snapshot-tee (video1/video2/video3)",
         )
         parser.add_argument(
+            "--snapshot-tee-keyframes",
+            action="store_true",
+            help="Decode only keyframes for --snapshot-tee (-skip_frame nokey):"
+            " a few percent of CPU instead of a full decode of the tee stream,"
+            " at the cost of the JPEG refreshing once per GOP (typically 1-4 s)"
+            " instead of once a second. For small hosts such as a Raspberry Pi",
+        )
+        parser.add_argument(
             "--event-lead",
             default=0.0,
             type=float,
@@ -1905,6 +1913,7 @@ class UnifiCamBase(metaclass=ABCMeta):
             if self._emits_h265(stream_index):
                 hevc_filter = f"{sys.executable} -m unifi.hevc_flv | "
             tee = ""
+            tee_in = ""
             if getattr(self.args, "snapshot_tee", None) and stream_index == getattr(
                 self.args, "snapshot_tee_stream", "video3"
             ):
@@ -1914,9 +1923,12 @@ class UnifiCamBase(metaclass=ABCMeta):
                     f' -map 0:v:0 -r 1 -update 1 -q:v 4 -f image2'
                     f' "{self.args.snapshot_tee}"'
                 )
+                if getattr(self.args, "snapshot_tee_keyframes", False):
+                    # the copy output never decodes, so this only throttles the tee
+                    tee_in = " -skip_frame nokey"
             cmd = (
                 "ffmpeg -nostdin -loglevel error -y"
-                f" {self.get_base_ffmpeg_args(stream_index)} -rtsp_transport"
+                f" {self.get_base_ffmpeg_args(stream_index)}{tee_in} -rtsp_transport"
                 f' {self.args.rtsp_transport} -i "{source}"'
                 f" {self.get_extra_ffmpeg_args(stream_index)} -metadata"
                 f" streamName={stream_name} -f flv -{tee} | {hevc_filter}{sys.executable} -m"
