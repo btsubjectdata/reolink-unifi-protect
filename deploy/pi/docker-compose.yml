@@ -88,6 +88,6 @@ services:
       - --snapshot-port
       - "${SNAPSHOT_PORT:-8999}"
       - --hold
-      - "${ONVIF_HOLD:-3}"
+      - "${ONVIF_HOLD:-5}"
       - --snapshot-file
       - /snapshots/cam.jpg

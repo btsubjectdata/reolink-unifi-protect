@@ -15,7 +15,7 @@ case "${CAM_TYPE:-rtsp}" in
     PY="$VENV/bin/python"; [ -x "$PY" ] || { fail "venv missing — run Install.command"; exit 1; }
     SIDE="$(dirname "$0")/onvif_sidecar.py"; [ -f "$SIDE" ] || SIDE="$PROJECT_DIR/onvif_sidecar.py"
     echo "[$(date '+%F %T')] [$CAM] starting onvif sidecar -> $CAM_IP:${ONVIF_PORT:-2020}, sink $SINK_URL"
-    exec "$PY" "$SIDE" --host "$CAM_IP" --port "${ONVIF_PORT:-2020}" --user "$CAM_USER" --password "$CAM_PASS" --sink "$SINK_URL" --snapshot-port "${SNAPSHOT_PORT:-$(( ${AI_SINK_PORT:-7999} + 1000 ))}" --snapshot-file "$SNAPDIR/$CAM.jpg" --hold "${ONVIF_HOLD:-3}"
+    exec "$PY" "$SIDE" --host "$CAM_IP" --port "${ONVIF_PORT:-2020}" --user "$CAM_USER" --password "$CAM_PASS" --sink "$SINK_URL" --snapshot-port "${SNAPSHOT_PORT:-$(( ${AI_SINK_PORT:-7999} + 1000 ))}" --snapshot-file "$SNAPDIR/$CAM.jpg" --hold "${ONVIF_HOLD:-5}"
     ;;
   reolink)
     [ -d "$SIDECAR/node_modules" ] || { fail "sidecar not installed — run Install.command"; exit 1; }

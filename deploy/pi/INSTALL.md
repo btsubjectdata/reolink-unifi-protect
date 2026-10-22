@@ -252,6 +252,11 @@ try to turn it back on. The cure is a **full power cycle** (unplug 10 s), not th
 button. The bridge reconnects by itself when the camera comes back; `./bridge.sh logs <camera>`
 shows `push-subscribed` followed by `person detected` on your next walk-by.
 
+**One walk-by shows up as several short events, and the later ones show an empty yard.**
+The camera paused longer between detections than `ONVIF_HOLD` (default 5 s). Set
+`ONVIF_HOLD=8` (or 10) in that camera's file and `./bridge.sh up`. The price is a slightly
+longer empty tail at the end of each clip.
+
 **Events arrive but no thumbnails.** `./bridge.sh logs driveway` → look for `Motion thumbnail`
 and `Object crop ready`. If you see "finished after the event ended", lower `THUMBNAIL_DELAY`
 to 3 in the camera file.

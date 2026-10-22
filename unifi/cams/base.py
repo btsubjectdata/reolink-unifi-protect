@@ -516,6 +516,12 @@ class UnifiCamBase(metaclass=ABCMeta):
             # reached us; backdate the start so the clip includes the walk-in.
             lead = max(0.0, float(getattr(self.args, "event_lead", 0) or 0))
             start_ts = time.time() - lead
+            # Never reach back into the previous event: overlapping events make
+            # Protect's clips for both of them start/end in the wrong place.
+            prev_end = getattr(self, "_last_event_end_ts", 0.0)
+            if start_ts < prev_end + 0.5:
+                start_ts = min(time.time(), prev_end + 0.5)
+                lead = max(0.0, time.time() - start_ts)
             payload: dict[str, Any] = {
                 # Real wall/monotonic clocks: Protect timestamps each
                 # descriptor sample off clockBestWall when persisting
@@ -657,6 +663,9 @@ class UnifiCamBase(metaclass=ABCMeta):
         now_ms = int(round(time.time() * 1000))
         # --event-lead: the subject was first seen before its event reached us
         lead_ms = int(max(0.0, float(getattr(self.args, "event_lead", 0) or 0)) * 1000)
+        # same clamp as the event start: not before the previous event ended
+        prev_end_ms = int(getattr(self, "_last_event_end_ts", 0.0) * 1000) + 500
+        lead_ms = max(0, min(lead_ms, now_ms - prev_end_ms))
         shown_ms = first_seen.setdefault(int(tracker_id), now_ms - lead_ms)
         return {
             "trackerID": int(tracker_id),
@@ -829,6 +838,7 @@ class UnifiCamBase(metaclass=ABCMeta):
             )
             self._motion_event_id += 1
             self._motion_event_ts = None
+            self._last_event_end_ts = time.time()
             self._motion_object_type = None
 
     def update_motion_snapshot(self, path: Path) -> None:

@@ -386,8 +386,12 @@ async def run(args: argparse.Namespace) -> None:
                         if cls not in active or time.time() - active[cls] >= HOLD:
                             log(f"{cls} detected ({m['topic']})")
                         active[cls] = time.time()
-                    else:
+                    elif args.honor_false:
                         active.pop(cls, None)
+                    # else: Tapo sends a true/false pair per detection, so a
+                    # "false" means "this blip is over", not "the subject left".
+                    # Let the class expire HOLD seconds after its last "true"
+                    # instead, or one walk-by becomes several short events.
                 if not args.dump and m["topic"] not in seen:
                     seen.add(m["topic"])
                     log(f"topic seen: {m['topic']} items={json.dumps(m['items'])}")
@@ -632,7 +636,12 @@ def main() -> None:
         "--hold",
         type=float,
         default=4.0,
-        help="seconds a class stays present after its last 'true' notification (Tapo repeats them every 1-4 s; a 'false' clears it at once)",
+        help="seconds a class stays present after its last 'true' notification; also the longest gap between detections that still counts as one event",
+    )
+    p.add_argument(
+        "--honor-false",
+        action="store_true",
+        help="end a class as soon as the camera sends 'false' (off by default: Tapo sends one after every detection, which splits a walk-by into many events)",
     )
     p.add_argument(
         "--mode",

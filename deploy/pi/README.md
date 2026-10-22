@@ -85,7 +85,7 @@ never click *Click to Update* on a bridged camera.
 Everything the macOS kit has, per camera file: `FFMPEG_ARGS` (16 kHz audio for Safari;
 `-bsf:v filter_units=remove_types=6` strips a Tapo's malformed SEI units), `THUMBNAIL_CROP` /
 `THUMBNAIL_DELAY` (motion-picked thumbnails), `EVENT_LEAD` (clip starts before the walk-in),
-`ONVIF_HOLD` / `AI_CLEAR_AFTER` (clip tail). See
+`ONVIF_HOLD` / `AI_CLEAR_AFTER` (when an event ends, and how big a gap still counts as one visit). See
 [`deploy/macos/README.md`](../macos/README.md#event-thumbnails-and-clip-timing-onvif-cameras).
 
 If the Pi runs hot: lowering the cameras' sub stream to 15 fps and 1 Mbps helps (it is the only

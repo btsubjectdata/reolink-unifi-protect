@@ -181,3 +181,17 @@ async def test_enter_and_moving_frames_carry_the_empty_snapshot_fields(cam):
     for f in frames:
         assert f["smartDetectSnapshots"] == [] and f["smartDetectSnapshotFullFoV"] == ""
         assert f["smartDetectSnapshotFullFoVWidth"] == 0
+
+
+async def test_back_to_back_events_do_not_overlap(cam):
+    # --event-lead backdates a start; it must never reach into the previous event
+    cam.args.event_lead = 6
+    await cam.trigger_motion_start(SmartDetectObjectType.ANIMAL)
+    await cam.trigger_motion_stop()
+    await cam.trigger_motion_start(SmartDetectObjectType.ANIMAL)
+    await cam.trigger_motion_stop()
+    frames = [m["payload"] for m in cam.sent if m["functionName"] == "EventSmartDetect"]
+    starts = [f["clockBestWall"] for f in frames if f["edgeType"] in ("start", "enter")]
+    stops = [f["clockWall"] for f in frames if f["edgeType"] in ("stop", "leave")]
+    assert len(starts) == 2 and len(stops) == 2
+    assert starts[1] >= stops[0], (starts, stops)

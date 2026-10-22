@@ -163,3 +163,13 @@ def test_event_lead_backdates_first_shown(cam):
     d = cam.build_smart_descriptor("person", [0, 0, 10, 10], 0.9, 11)
     assert 2400 <= d["timestamp"] - d["firstShownTimeMs"] <= 2600
     assert d["duration"] == d["timestamp"] - d["firstShownTimeMs"]
+
+
+def test_event_lead_never_overlaps_previous_event(cam):
+    import time as _t
+
+    cam.args.event_lead = 6
+    cam._last_event_end_ts = _t.time() - 2  # previous event ended 2 s ago
+    d = cam.build_smart_descriptor("animal", [0, 0, 10, 10], 0.9, 21)
+    # backdated at most to 0.5 s after the previous event's end, not 6 s
+    assert d["timestamp"] - d["firstShownTimeMs"] <= 1600
