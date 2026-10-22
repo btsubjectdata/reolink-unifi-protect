@@ -214,6 +214,24 @@ Done. The bridge starts by itself after a reboot or power cut.
 
 ---
 
+## Optional: put Docker on a USB SSD
+
+Not required — the bridge already keeps its constant writes in RAM. A USB **SATA** SSD
+(2.5" drive in a USB enclosure) takes the remaining writes (container images, logs, system
+journal) off the SD card. NVMe-in-USB enclosures usually draw too much power for a Pi's USB
+port and never show up; SATA ones are fine on a blue USB 3 port.
+
+```sh
+lsblk -o NAME,SIZE,MODEL,TRAN          # find the SSD, e.g. sda ... usb
+sudo apt install -y rsync parted
+sudo ./move-to-ssd.sh /dev/sda          # ERASES that drive; type ERASE to confirm
+sudo reboot                             # check it all comes back by itself
+```
+
+After the reboot `./bridge.sh status` shows every container up and `findmnt /srv/ssd` shows
+the SSD. The Pi still boots from the SD card; if the SSD is ever unplugged the Pi boots but the
+bridge waits until the SSD is back.
+
 ## Everyday
 
 | Want to… | Type |

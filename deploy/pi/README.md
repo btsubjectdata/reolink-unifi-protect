@@ -17,6 +17,7 @@ sidecar), plus:
 - **nothing is written to the SD card** while running: the once-a-second snapshot JPEG and the
   event crops live in RAM (`/dev/shm`), container logs are capped at 10 MB
 - a Debian image that builds on arm64 with no toolchain (a few minutes on a Pi 4)
+- `move-to-ssd.sh` — optional: Docker's images, containers, logs and the journal onto a USB SSD
 - `import-mac-config.sh` — moves the macOS kit's configuration over, keeping `CAM_MAC` so Protect
   keeps the cameras and their history
 
