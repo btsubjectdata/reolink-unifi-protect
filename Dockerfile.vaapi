@@ -1,8 +1,11 @@
-# VAAPI/QSV-enabled unifi-cam-proxy for Intel iGPU hosts (NAS, N100-class mini PC, any
+# VAAPI/QSV-enabled unifi-cam-proxy for Intel iGPU hosts. 26.04 rather than 24.04: the
+# 24.04 oneVPL GPU runtime (libmfx-gen 23.x) cannot open a Quick Sync session on
+# Raptor Lake-U refresh (Core 3 100U) and newer chips; 26.04's 26.x can.
+# (NAS, N100-class mini PC, any
 # Linux box exposing /dev/dri/renderD128). Upstream's published image is Alpine 3.10 with
 # an ffmpeg that has VAAPI encoders compiled in but NO Intel driver, so VAAPI
-# cannot initialize there. This image builds on Ubuntu 24.04 (glibc): its
-# ffmpeg 6.1 can mux HEVC into FLV ("enhanced FLV"), which the current
+# cannot initialize there. This image builds on Ubuntu 26.04 (glibc): its
+# ffmpeg 8 can mux HEVC into FLV ("enhanced FLV"), which the current
 # H.265-passthrough plan needs, and the Intel iHD driver + oneVPL runtime
 # keep the QSV fallback (--hw-transcode in unifi/cams/base.py) working if
 # Protect refuses the passthrough stream.
@@ -17,7 +20,7 @@ COPY deploy/ai-sidecar/package.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 COPY deploy/ai-sidecar/index.mjs deploy/ai-sidecar/decode.mjs ./
 
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LIBVA_DRIVER_NAME=iHD \

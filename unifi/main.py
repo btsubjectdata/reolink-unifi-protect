@@ -217,7 +217,9 @@ async def run():
 
 
 def main():
-    loop = asyncio.get_event_loop()
+    # Python >= 3.14: get_event_loop() no longer creates a loop implicitly
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.run_until_complete(run())
 
 
