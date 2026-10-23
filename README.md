@@ -63,7 +63,8 @@ running natively on a **Mac** (no Docker):
 - **`deploy/n100/`** — the Reolink full-quality path on a small Intel box (N95/N100/Core-U): 5K H.265
   passthrough, sub stream to HEVC on Quick Sync, boxes + push events + spotlight, one container;
   `probe.sh` reads the camera's real stream specs into `.env`. Assembled from the verified pieces
-  above for a Reolink Elite Floodlight WiFi; *not yet run end to end — feedback welcome.*
+  above for a Reolink Elite Floodlight WiFi; the Intel hardware path is verified on a Core 3 100U,
+  the full camera-to-Protect run is still pending — feedback welcome.
 - **Docker stack for ONVIF cameras** ([`deploy/onvif/`](deploy/onvif)) — the single-camera
   predecessor of `deploy/pi`, kept for reference; use `deploy/pi` on any Docker host. The existing Reolink
   [`deploy/docker-compose.yml`](deploy/docker-compose.yml) keeps working and gets the Protect 7

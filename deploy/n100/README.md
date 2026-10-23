@@ -17,20 +17,48 @@ One container, `docker compose up -d`, restarts itself, survives reboots.
 ## Hardware
 
 Any mini PC with an **Intel** CPU that has Quick Sync HEVC encode: N95, N100, N150, or a
-Core i3/i5/Core-U. 8 GB RAM and a 128 GB SSD are plenty; wired Ethernet. Avoid AMD for this
+Core i3/i5/Core-U (the hardware path — Quick Sync decode, HEVC encode, UniFi FLV framing — is
+verified on a Core 3 100U). 8 GB RAM and a 128 GB SSD are plenty; wired Ethernet. Avoid AMD for this
 recipe (different encoder path, untested). Expect ~10–15 W at the wall.
 
 ## 1. Operating system
 
-Ubuntu Server 24.04 LTS (or Debian 12), minimal install, wired, static IP or DHCP
-reservation on the router. Then:
+**Ubuntu Server 26.04 LTS** (plain "Ubuntu Server", not "minimized"), wired, DHCP reservation
+on the router. In the installer: use the entire disk, tick *Install OpenSSH server*, select no
+snaps (in particular not the Docker snap — it cannot see the iGPU properly).
+
+Two things the installer gets wrong, fix them first:
 
 ```sh
-sudo apt update && sudo apt install -y docker.io docker-compose-v2 git ffmpeg vainfo intel-media-va-driver-non-free
+# 1. it only allocates 100 GB of an LVM disk; give the system all of it
+sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv
+# 2. if you installed over WiFi, the wired port gets no DHCP at all; check:
+cat /etc/netplan/*.yaml       # enp...: must have "dhcp4: true" - add it, then: sudo netplan apply
+```
+
+Then the software:
+
+```sh
+sudo apt update && sudo apt full-upgrade -y
+sudo apt install -y git ffmpeg vainfo intel-media-va-driver-non-free libvpl2 libmfx-gen1.2
+curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker,video,render $USER     # log out and back in
-vainfo | grep -i hevc                          # must list HEVC *Enc* entry points
+sudo timedatectl set-timezone America/Chicago  # your zone
+vainfo | grep -i "HEVCMain.*Enc"               # must list HEVC encode entry points
 timedatectl                                    # NTP must be active: Protect drops frames past ~1 s of drift
 ```
+
+Quick Sync self-test (H.264 in, H.265 out on the iGPU, should finish in ~2 s):
+
+```sh
+ffmpeg -nostdin -loglevel error -y -f lavfi -i testsrc2=s=1536x432:r=20 -t 20 -c:v libx264 /tmp/sub.mp4
+ffmpeg -nostdin -loglevel error -y -init_hw_device qsv=hw:/dev/dri/renderD128 -filter_hw_device hw \
+  -i /tmp/sub.mp4 -vf hwupload=extra_hw_frames=64,format=qsv -c:v hevc_qsv -b:v 1M /tmp/out.mp4 && echo QSV OK
+```
+
+`Error creating a MFX session: -9` means the oneVPL GPU runtime is too old for the chip
+(Ubuntu 24.04's libmfx-gen 23.x fails on a Core 3 100U); that is why both this host and the
+image use 26.04.
 
 ## 2. The camera (Reolink app or web UI)
 
