@@ -16,7 +16,8 @@ services:
       context: ../..
       dockerfile: Dockerfile.vaapi
     image: unifi-cam-proxy:vaapi
-    container_name: ${CAM_NAME:-reolink}-proxy
+    # not CAM_NAME: that is a display name and may contain spaces
+    container_name: ${CONTAINER_NAME:-reolink-proxy}
     restart: unless-stopped
     network_mode: host          # Protect sees the proxy's own IP; push/ONVIF callbacks work
     devices:
