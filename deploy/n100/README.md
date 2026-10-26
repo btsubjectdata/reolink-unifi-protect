@@ -124,7 +124,8 @@ openssl req -x509 -nodes -newkey rsa:2048 -keyout client.key -out client.crt -da
   -subj "/CN=unifi-cam-proxy" && cat client.key client.crt > client.pem
 ```
 
-`NVR_USER` / `NVR_PASS` is a **local** Protect admin made for the bridge (Protect → Settings →
+`VIDEO_GID` / `RENDER_GID` are the host's group ids from `getent group video render` (the
+container joins them to use the iGPU). `NVR_USER` / `NVR_PASS` is a **local** Protect admin made for the bridge (Protect → Settings →
 Admins & Users → Add → local, Administrator). `CAM_MAC` is any unique 12-hex-digit value.
 `FW_VERSION` must match the current UVC G5 Pro release — see *After a Protect update*.
 

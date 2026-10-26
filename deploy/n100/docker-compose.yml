@@ -22,9 +22,10 @@ services:
     network_mode: host          # Protect sees the proxy's own IP; push/ONVIF callbacks work
     devices:
       - /dev/dri:/dev/dri       # the iGPU, for the sub-stream HEVC transcode
+    # numeric: the image has no 'render' group; host values from `getent group render video`
     group_add:
-      - video
-      - render
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-992}"
     volumes:
       - ./client.pem:/client.pem:ro
       - type: tmpfs
