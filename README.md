@@ -64,7 +64,12 @@ running natively on a **Mac** (no Docker):
   passthrough, sub stream to HEVC on Quick Sync, boxes + push events + spotlight, one container;
   `probe.sh` reads the camera's real stream specs into `.env`. Assembled from the verified pieces
   above for a Reolink Elite Floodlight WiFi; the Intel hardware path is verified on a Core 3 100U,
-  the full camera-to-Protect run is still pending — feedback welcome.
+  the full camera-to-Protect run is in progress — feedback welcome.
+- **Reolink's encrypted HTTP API** (`unifi/reolink_api.py`) — cameras on 2025+ firmware (Elite
+  Floodlight v3.2.0.6011) refuse the classic plaintext login and snapshot URL; this fork speaks their
+  digest-login + AES-encrypted protocol for snapshots, spotlight, image settings and reboot, falls
+  back to the old login on older cameras, and ships `python -m unifi.reolink_tool` to create the
+  camera user and read stream specs when the Reolink app hides those settings.
 - **Docker stack for ONVIF cameras** ([`deploy/onvif/`](deploy/onvif)) — the single-camera
   predecessor of `deploy/pi`, kept for reference; use `deploy/pi` on any Docker host. The existing Reolink
   [`deploy/docker-compose.yml`](deploy/docker-compose.yml) keeps working and gets the Protect 7

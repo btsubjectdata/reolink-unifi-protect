@@ -13,11 +13,10 @@ So only the four cardinal pan/tilt ops are ever sent (picking whichever axis is 
 drag is imprecisely diagonal), and ``z>0`` (what the UI treats as zoom in) maps to ``ZoomInc``.
 """
 
-import asyncio
 import logging
 from typing import Any, Optional
 
-import aiohttp
+from unifi.reolink_api import ReolinkApi
 
 # Below this (on the -1000..1000 scale) a tick counts as released, matching the all-zero
 # message Protect sends on release rather than requiring an exact 0.
@@ -54,7 +53,7 @@ def _scale_speed(magnitude: int) -> int:
     return max(MIN_SPEED, min(MAX_SPEED, round(abs(magnitude) / 1000 * MAX_SPEED)))
 
 
-class ReolinkPtz:
+class ReolinkPtz(ReolinkApi):
     def __init__(
         self,
         host: str,
@@ -63,81 +62,17 @@ class ReolinkPtz:
         logger: logging.Logger,
         channel: int = 0,
     ) -> None:
-        self.host = host
-        self.user = user
-        self.password = password
-        self.logger = logger
-        self.channel = channel
-        self._token: Optional[str] = None
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._lock = asyncio.Lock()
+        super().__init__(host, user, password, logger, channel)
         # (op, speed) of the last command actually sent. Speed is part of the key:
         # Reolink has no speed-only update, so a stronger/weaker push mid-hold in the
         # same direction must still issue a new PtzCtrl, not just a direction change.
         self._last_sent: tuple[Optional[str], Optional[int]] = (None, None)
 
-    async def _post(self, query: str, body: list) -> list:
-        # One kept-alive connection: a fresh TLS handshake per command made every
-        # PtzCtrl take ~420 ms against ~100 ms reused, so a Stop landed 300+ ms late
-        # and the camera kept moving (overshoot on quick taps and direction changes).
-        url = f"https://{self.host}/cgi-bin/api.cgi?{query}"
-        for attempt in (0, 1):
-            if self._session is None or self._session.closed:
-                self._session = aiohttp.ClientSession()
-            try:
-                async with self._session.post(
-                    url, json=body, ssl=False, timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
-                    return await resp.json(content_type=None)
-            except (aiohttp.ServerDisconnectedError, aiohttp.ClientOSError):
-                # The camera drops idle connections: reconnect once.
-                await self.close()
-                if attempt:
-                    raise
-        raise RuntimeError("unreachable")
-
-    async def close(self) -> None:
-        session, self._session = self._session, None
-        if session is not None and not session.closed:
-            await session.close()
-
-    async def _login(self) -> None:
-        res = await self._post(
-            "cmd=Login",
-            [
-                {
-                    "cmd": "Login",
-                    "param": {
-                        "User": {
-                            "Version": "0",
-                            "userName": self.user,
-                            "password": self.password,
-                        }
-                    },
-                }
-            ],
-        )
-        self._token = res[0]["value"]["Token"]["name"]
-
     async def _ptz_ctrl(self, param: dict[str, Any]) -> bool:
-        for attempt in (0, 1):
-            if self._token is None:
-                await self._login()
-            res = await self._post(
-                f"token={self._token}",
-                [{"cmd": "PtzCtrl", "param": {"channel": self.channel, **param}}],
-            )
-            r = res[0]
-            # rspCode -6 / -7 mean the token is no longer valid; any other failure
-            # (bad op, camera busy, ...) is reported as-is, not blindly retried.
-            if (
-                attempt == 0
-                and r.get("code") != 0
-                and r.get("error", {}).get("rspCode") in (-6, -7)
-            ):
-                self._token = None
-                continue
-            return r.get("code") == 0
+        # A stale token is retried once by ``call``; any other failure (bad op, camera
+        # busy, ...) is reported as-is, not blindly retried.
+        r = await self.call_one("PtzCtrl", {"channel": self.channel, **param})
+        return r.get("code") == 0
 
     async def goto_preset(self, preset_id: int, speed: int = 32) -> bool:
         """Drive the camera to one of its own saved presets (Reolink ``ToPos``).

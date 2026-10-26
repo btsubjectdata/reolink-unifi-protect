@@ -24,23 +24,7 @@ class ReolinkLight(ReolinkPtz):
     """Same session, login and token handling as the PTZ client, for ``SetWhiteLed``."""
 
     async def _api(self, cmd: str, param: dict) -> bool:
-        for attempt in (0, 1):
-            if self._token is None:
-                await self._login()
-            res = await self._post(
-                f"token={self._token}", [{"cmd": cmd, "param": param}]
-            )
-            r = res[0]
-            # rspCode -6 / -7: the token is no longer valid, log in once more
-            if (
-                attempt == 0
-                and r.get("code") != 0
-                and r.get("error", {}).get("rspCode") in (-6, -7)
-            ):
-                self._token = None
-                continue
-            return r.get("code") == 0
-        return False
+        return (await self.call_one(cmd, param)).get("code") == 0
 
     async def set_spotlight(self, on: bool, brightness: Optional[int] = None) -> bool:
         """Switch the white LED on or off. Never raises."""

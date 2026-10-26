@@ -9,6 +9,7 @@ docstring.
 
 import argparse
 import asyncio
+import json
 import logging
 
 import aiohttp
@@ -75,6 +76,11 @@ class FakeCam(ReolinkPtz):
         super().__init__("cam", "u", "p", LOG)
         self.fail = fail
         self.calls = []
+
+    async def _request(self, method, query, data):
+        # the old plain-API fakes answer decoded command lists: wrap them
+        body = json.loads(data) if data else []
+        return 200, {}, json.dumps(await self._post(query, body)).encode()
 
     async def _post(self, query, body):
         self.calls.append(body)
@@ -255,6 +261,9 @@ def test_protect_continuous_move_message_reaches_the_hook_through_process():
 
 
 class _Resp:
+    status = 200
+    headers = {}
+
     def __init__(self, fail):
         self.fail = fail
 
@@ -266,8 +275,8 @@ class _Resp:
     async def __aexit__(self, *exc):
         return False
 
-    async def json(self, content_type=None):
-        return [{"code": 0}]
+    async def read(self):
+        return b'[{"code": 0}]'
 
 
 def _fake_sessions(monkeypatch, fail_first_post=False):
@@ -279,7 +288,7 @@ def _fake_sessions(monkeypatch, fail_first_post=False):
             self.posts = 0
             made.append(self)
 
-        def post(self, *a, **kw):
+        def request(self, method, *a, **kw):
             self.posts += 1
             return _Resp(fail_first_post and len(made) == 1)
 
@@ -298,7 +307,7 @@ def test_commands_share_one_kept_alive_connection(monkeypatch):
 
     async def go():
         for _ in range(3):
-            await ptz._post("token=t", [])
+            await ptz._request("POST", "token=t", b"[]")
         await ptz.close()
 
     asyncio.run(go())
@@ -308,8 +317,8 @@ def test_commands_share_one_kept_alive_connection(monkeypatch):
 def test_dropped_connection_reconnects_once(monkeypatch):
     made = _fake_sessions(monkeypatch, fail_first_post=True)
     ptz = ReolinkPtz("cam", "u", "p", LOG)
-    res = asyncio.run(ptz._post("token=t", []))
-    assert res == [{"code": 0}]
+    res = asyncio.run(ptz._request("POST", "token=t", b"[]"))
+    assert res[2] == b'[{"code": 0}]'
     assert len(made) == 2 and made[0].closed
 
 
@@ -508,6 +517,11 @@ class FakeLightApi(ReolinkLight):
     def __init__(self):
         super().__init__("cam", "u", "p", LOG)
         self.calls = []
+
+    async def _request(self, method, query, data):
+        # the old plain-API fakes answer decoded command lists: wrap them
+        body = json.loads(data) if data else []
+        return 200, {}, json.dumps(await self._post(query, body)).encode()
 
     async def _post(self, query, body):
         self.calls.append(body)

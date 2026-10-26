@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import json
 import logging
 
 from unifi.cams.rtsp import RTSPCam
@@ -51,6 +52,11 @@ class FakeCam(ReolinkIsp):
         self.isp = isp
         self.fail = fail
         self.calls = []
+
+    async def _request(self, method, query, data):
+        # the old plain-API fakes answer decoded command lists: wrap them
+        body = json.loads(data) if data else []
+        return 200, {}, json.dumps(await self._post(query, body)).encode()
 
     async def _post(self, query, body):
         self.calls.append(body)
@@ -165,7 +171,12 @@ def test_reboot_allowed_again_after_cooldown():
 def test_client_reboot_sends_only_the_reboot_command():
     cam = FakeCam({"channel": 0})
     assert asyncio.run(cam.reboot()) is True
-    assert [c["cmd"] for call in cam.calls for c in call] == ["Login", "Reboot"]
+    # challenge + plain login (older firmware), then only the reboot
+    assert [c["cmd"] for call in cam.calls for c in call] == [
+        "Login",
+        "Login",
+        "Reboot",
+    ]
 
 
 def test_client_reboot_reports_a_refusal():

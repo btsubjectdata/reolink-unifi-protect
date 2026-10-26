@@ -1,7 +1,8 @@
 # Reolink → UniFi Protect on a small Intel box (N95 / N100 / N150 / Core-U mini PC)
 
 The full-featured path for a Reolink camera — verified upstream on a **Reolink Elite
-Floodlight WiFi** (5120×1552 H.265, 180° dual-lens) with Protect 7.3.70:
+Floodlight WiFi** (5120×1552 H.265, 180° dual-lens) with Protect 7.3.70, and updated here
+for the camera's 2026 firmware (encrypted HTTP API, see §2):
 
 - the camera's **native H.265 main stream passed through untouched** (no quality loss)
 - the H.264 sub stream transcoded to H.265 on the **Intel iGPU (Quick Sync)** — Protect wants
@@ -60,13 +61,42 @@ ffmpeg -nostdin -loglevel error -y -init_hw_device qsv=hw:/dev/dri/renderD128 -f
 (Ubuntu 24.04's libmfx-gen 23.x fails on a Core 3 100U); that is why both this host and the
 image use 26.04.
 
-## 2. The camera (Reolink app or web UI)
+## 2. The camera (Reolink app)
 
-- **Network → Advanced → Port**: enable **RTSP**, **ONVIF**, **HTTPS** (HTTP optional).
-- **User Management**: add a dedicated admin user for the bridge (the AI / push / spotlight
-  API needs admin). Use it, not your own.
-- **Stream (Clear)**: leave H.265; 15–20 fps; bitrate 6–8 Mbps for a 5K panoramic.
-  **Fluent**: note its resolution (1536×432 or 1920×576) and fps.
+- Camera → ⚙ → **More Features → Advanced Network Settings → Server Settings**: switch on
+  **RTSP**, **ONVIF** and **HTTPS** (older apps: Network → Advanced → Port). Leave HTTP and
+  RTMP off.
+- A dedicated admin user for the bridge (the AI / push / spotlight API needs admin). Current
+  Reolink apps hide *User Management*; create it over the camera's own API instead, from the
+  box, once the image is built (step 4):
+
+  ```sh
+  REOLINK_PASS='<camera admin password>' docker compose run --rm --entrypoint python \
+    -e REOLINK_PASS proxy -m unifi.reolink_tool --host <camera-ip> --user admin add-user bridge
+  ```
+
+  It prints the new user's generated password once — that is `CAM_PASS`. The admin
+  password is used for this one call and stored nowhere.
+- **Stream (Clear)**: leave H.265; 20–25 fps; bitrate 6–8 Mbps for a 5K panoramic.
+  **Fluent**: note its resolution (1536×432 or 1920×576) and fps — or read both from
+  `... reolink_tool --host <camera-ip> --user bridge info`.
+
+### Firmware from 2025 on: the encrypted API
+
+Cameras on recent firmware (seen: Elite Floodlight WiFi **v3.2.0.6011**, March 2026) refuse
+the classic HTTP API: a plaintext `Login` answers `login deny` (-503) and the
+`cmd=Snap&user=&password=` snapshot URL answers `login failed`, even with the right
+password — only RTSP and ONVIF still accept it directly. They speak the protocol of their
+own web page instead: an HTTP-digest login (`WWW-Authenticate` challenge, MD5 response),
+then every request body AES-128-CFB encrypted with a key derived from the nonce and the
+password, and a per-request check number in the query string. `unifi/reolink_api.py`
+implements it (and falls back to the plain login on older cameras), the spotlight, image
+settings, reboot and `reolink_tool` use it, and snapshots come through it with
+`--snapshot-url reolink://main` (what this compose uses). The Baichuan push channel
+(port 9000) that delivers the AI events is a separate protocol and was never affected.
+
+Symptoms of hitting this with older code: snapshots/thumbnails missing, spotlight never
+switching, `login deny` in the log, while live view works.
 - Make sure the camera is **not** adopted directly in Protect (Settings → General → Advanced →
   turn off *Discover 3rd-Party Cameras*, remove any native entry): two owners fight over its
   RTSP sessions.
@@ -79,10 +109,12 @@ cd reolink-unifi-protect/deploy/n100
 ./probe.sh <camera-ip> <camera-user> '<camera-password>'
 ```
 
-It checks ports 554 / 443 / 9000, reads the real codec, size and fps of both streams, tests
-the HTTPS snapshot and AI API, and prints the `HI_*` / `LO_*` lines for `.env`. Protect
-**caches these at adoption** — a wrong number means remove the camera in Protect and adopt
-again, so get them from the probe, not the spec sheet.
+It checks ports 554 / 443 / 9000, reads the real codec, size and fps of both streams over
+RTSP and prints the `HI_*` / `LO_*` lines for `.env` (its HTTPS snapshot / API checks only
+pass on older firmware — see above; use `reolink_tool info` on new ones). Protect **caches
+these at adoption** — a wrong number means remove the camera in Protect and adopt again, so
+get them from the probe, not the spec sheet. The floodlight on v3.2.0.6011 runs
+5120×1552 @ 25 fps and 1920×576 @ 25 fps; earlier firmware reported 20 fps and 1536×432.
 
 ## 4. Configure
 

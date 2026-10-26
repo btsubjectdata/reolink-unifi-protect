@@ -76,7 +76,9 @@ class RTSPCam(UnifiCamBase):
             default=None,
             type=str,
             required=False,
-            help="HTTP endpoint to fetch snapshot image from",
+            help="HTTP endpoint to fetch snapshot image from. 'reolink://main' (or"
+            " sub/ext) fetches it through the Reolink API with the --reolink-ai-*"
+            " credentials instead, which is the only way on 2025+ Reolink firmware",
         )
         # --- House: bridge the Reolink's ON-CAMERA AI into Protect smart
         # detections. Polls the HTTPS api (GetAiState) and maps
@@ -974,6 +976,25 @@ class RTSPCam(UnifiCamBase):
     async def get_video_settings(self) -> dict:
         # Protect owns these values: echo back what it last set, never the camera's.
         return dict(getattr(self, "_isp_state", {}))
+
+    async def fetch_to_file(self, url: str, dst: Path) -> bool:
+        if not url.startswith("reolink://"):
+            return await super().fetch_to_file(url, dst)
+        if not self.args.reolink_ai_host:
+            self.logger.error("--snapshot-url reolink:// needs --reolink-ai-host")
+            return False
+        snap_type = url[len("reolink://") :].strip("/") or "main"
+        try:
+            body = await self._reolink_client().snapshot(snap_type)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning(f"Reolink snapshot ({snap_type}) failed: {exc}")
+            return False
+        # Atomic replace: the destination is read concurrently.
+        tmp = dst.with_name(dst.name + ".part")
+        with tmp.open("wb") as f:
+            f.write(body)
+        os.replace(tmp, dst)
+        return True
 
     def _reolink_client(self) -> ReolinkIsp:
         if not hasattr(self, "_isp"):

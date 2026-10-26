@@ -57,7 +57,7 @@ services:
           --hi-codec h265 --hi-width "$$HI_WIDTH" --hi-height "$$HI_HEIGHT" --hi-fps "$$HI_FPS" \
           --lo-codec h265 --lo-h265-transcode --transcode-backend qsv \
           --lo-width "$$LO_WIDTH" --lo-height "$$LO_HEIGHT" --lo-fps "$$LO_FPS" \
-          --snapshot-url "https://$$CAM_IP/cgi-bin/api.cgi?cmd=Snap&channel=0&rs=proxy&user=$$CAM_USER&password=$$CAM_PASS" \
+          --snapshot-url "reolink://$${SNAPSHOT_STREAM:-main}" \
           --reolink-ai-host "$$CAM_IP" --reolink-ai-user "$$CAM_USER" --reolink-ai-password "$$CAM_PASS" \
           --reolink-push-ai \
           --ai-sidecar --ai-sidecar-profile "$${AI_SIDECAR_PROFILE:-sub}" \

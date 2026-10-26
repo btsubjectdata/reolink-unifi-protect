@@ -12,11 +12,10 @@ Mapping (Protect 0-100 sliders to Reolink 0-255, where 50 is the 128 midpoint):
   ``DynamicRangeControl`` with ``drc`` set from the level, or ``Off`` at 0
 """
 
-import asyncio
 import logging
 from typing import Any, Optional
 
-import aiohttp
+from unifi.reolink_api import ReolinkApi
 
 IMAGE_FIELDS = {
     "brightness": "bright",
@@ -67,7 +66,7 @@ def plan_changes(
     return image, out
 
 
-class ReolinkIsp:
+class ReolinkIsp(ReolinkApi):
     def __init__(
         self,
         host: str,
@@ -76,55 +75,11 @@ class ReolinkIsp:
         logger: logging.Logger,
         channel: int = 0,
     ) -> None:
-        self.host = host
-        self.user = user
-        self.password = password
-        self.logger = logger
-        self.channel = channel
-        self._token: Optional[str] = None
-        self._lock = asyncio.Lock()
+        super().__init__(host, user, password, logger, channel, timeout=15.0)
         self._applied: dict[str, Any] = {}
 
-    async def _post(self, query: str, body: list) -> list:
-        url = f"https://{self.host}/cgi-bin/api.cgi?{query}"
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, json=body, ssl=False, timeout=aiohttp.ClientTimeout(total=15)
-            ) as resp:
-                return await resp.json(content_type=None)
-
-    async def _login(self) -> None:
-        res = await self._post(
-            "cmd=Login",
-            [
-                {
-                    "cmd": "Login",
-                    "param": {
-                        "User": {
-                            "Version": "0",
-                            "userName": self.user,
-                            "password": self.password,
-                        }
-                    },
-                }
-            ],
-        )
-        self._token = res[0]["value"]["Token"]["name"]
-
     async def _call(self, cmds: list) -> list:
-        for attempt in (0, 1):
-            if self._token is None:
-                await self._login()
-            res = await self._post(f"token={self._token}", cmds)
-            # rspCode -6 / -7 mean the token is no longer valid.
-            if attempt == 0 and any(
-                r.get("code") != 0 and r.get("error", {}).get("rspCode") in (-6, -7)
-                for r in res
-            ):
-                self._token = None
-                continue
-            return res
-        return res
+        return await self.call(cmds)
 
     async def apply(self, options: dict[str, Any]) -> None:
         """Write the options that changed since the last successful apply."""
