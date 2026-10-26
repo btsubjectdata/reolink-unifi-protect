@@ -37,6 +37,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    env_file:
+      - .env                    # the camera / NVR settings and secrets, into the container
     environment:
       TZ: ${TZ:-America/Chicago}
     entrypoint: ["/bin/sh", "-c"]
