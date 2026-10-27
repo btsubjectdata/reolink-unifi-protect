@@ -957,6 +957,21 @@ class RTSPCam(UnifiCamBase):
                     " event ended; dropped"
                 )
                 return
+            placeholder_tid = self.synthetic_tracker_id()
+            if int(tracker_id) == placeholder_tid:
+                if any(
+                    e["trackerID"] != placeholder_tid for e in self._smart_snapshots
+                ):
+                    # a real box already produced a crop: the centred guess loses
+                    out.unlink(missing_ok=True)
+                    self._smart_snapshot_files.pop(fname, None)
+                    return
+            else:
+                self._drop_placeholder_crop()
+            # one entry per tracker: a later crop of the same object replaces it
+            self._smart_snapshots = [
+                e for e in self._smart_snapshots if e["trackerID"] != int(tracker_id)
+            ]
             self._smart_snapshots.append(
                 {
                     "trackerID": int(tracker_id),
@@ -1288,8 +1303,10 @@ class RTSPCam(UnifiCamBase):
         elif desired and self._ai_active is None:
             self.logger.info(f"Reolink AI (push): {desired.value} detected")
             self._ai_crops_made = set()  # per-event crop bookkeeping starts fresh
-            await self.trigger_motion_start(desired)
+            # Set before the awaits: the camera often pushes twice within a
+            # second, and a second start would make a second placeholder crop.
             self._ai_active = desired
+            await self.trigger_motion_start(desired)
             # Push events carry no coordinates, so crop the same centred box
             # trigger_motion_start announced. Without a per-object crop ds
             # stores no detectedThumbnails and Protect's Person/Animal/Vehicle
