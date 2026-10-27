@@ -46,6 +46,8 @@ class RTSPCam(UnifiCamBase):
         self._ai_class_state: dict = {}
         self._ai_active = None
         self._ai_last_event_ts = 0.0
+        self._push_last_true_ts = 0.0
+        self._push_clear_task = None
         self.stream_source = dict()
         for i, stream_index in enumerate(["video1", "video2", "video3"]):
             if not i < len(self.args.source):
@@ -249,6 +251,16 @@ class RTSPCam(UnifiCamBase):
             help="End the smart-detect event this many seconds after the"
             " last box report from the AI sink (lower = shorter tail on"
             " each clip, higher = fewer split events)",
+        )
+        parser.add_argument(
+            "--push-hold",
+            default=5.0,
+            type=float,
+            help="With --reolink-push-ai: keep the event open this many seconds"
+            " after the camera's AI flag drops. Some firmware (Elite Floodlight"
+            " v3.2) pulses the flag for one second per detection, which ends the"
+            " event before the box sidecar has delivered a single box (0 = end"
+            " the event as soon as the flag drops)",
         )
         parser.add_argument(
             "--thumbnail-crop",
@@ -1257,8 +1269,20 @@ class RTSPCam(UnifiCamBase):
                     continue
                 if states.get(key):
                     self._ai_class_state[object_type.value] = now
+                    self._push_last_true_ts = now
                     if desired is None:
                         desired = object_type
+        hold = float(getattr(self.args, "push_hold", 0) or 0)
+        if (
+            desired is None
+            and not force_clear
+            and self._ai_active is not None
+            and now - getattr(self, "_push_last_true_ts", 0.0) < hold
+        ):
+            # The flag dropped within the hold: keep the event open and look
+            # again when the hold runs out (a new "true" simply extends it).
+            self._schedule_push_clear(hold - (now - self._push_last_true_ts))
+            return
         if time.time() - self._sink_last_ts < 10 and not self._enrich_only():
             self._ai_active = None  # the box sidecar drives events while it is alive
         elif desired and self._ai_active is None:
@@ -1277,6 +1301,17 @@ class RTSPCam(UnifiCamBase):
             self.logger.info("Reolink AI (push): clear")
             await self.trigger_motion_stop()
             self._ai_active = None
+
+    def _schedule_push_clear(self, delay: float) -> None:
+        task = getattr(self, "_push_clear_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+
+        async def later() -> None:
+            await asyncio.sleep(max(delay, 0.05))
+            await self._apply_ai_states({})
+
+        self._push_clear_task = asyncio.create_task(later())
 
     async def _expire_stale_ai(self) -> None:
         # Safety net: if the push goes quiet mid-event, never leave motion stuck on.

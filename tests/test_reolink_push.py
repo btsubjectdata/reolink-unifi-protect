@@ -28,6 +28,7 @@ def cam():
         reolink_ai_password="p",
         reolink_push_button=True,
         reolink_push_ai=True,
+        push_hold=0,
     )
     c.logger = logging.getLogger("test")
     c._ai_class_state = {}
@@ -213,3 +214,28 @@ async def test_push_detection_requests_a_per_object_crop(cam):
     await cam._apply_ai_states(states(people=True))
     await cam._apply_ai_states(states(people=True))  # repeated: no second crop
     assert cam.crops == [(100, "person", cam.SYNTHETIC_BOX)]
+
+
+@pytest.mark.asyncio
+async def test_push_hold_keeps_a_one_second_pulse_open(cam):
+    # Elite Floodlight v3.2 firmware pulses the AI flag true -> false within a
+    # second; the box sidecar needs a few seconds, so the event is held open.
+    cam.args.push_hold = 0.3
+    await cam._apply_ai_states(states(vehicle=True))
+    await cam._apply_ai_states(states())  # flag drops immediately
+    assert cam.events == [("start", SmartDetectObjectType.VEHICLE)]
+    await asyncio.sleep(0.15)
+    await cam._apply_ai_states(states(vehicle=True))  # another pulse extends the hold
+    await asyncio.sleep(0.2)
+    assert cam.events == [("start", SmartDetectObjectType.VEHICLE)]
+    await asyncio.sleep(0.3)
+    assert cam.events[-1] == ("stop",)
+    assert cam.events.count(("stop",)) == 1
+
+
+@pytest.mark.asyncio
+async def test_push_hold_zero_ends_immediately(cam):
+    cam.args.push_hold = 0
+    await cam._apply_ai_states(states(people=True))
+    await cam._apply_ai_states(states())
+    assert cam.events == [("start", SmartDetectObjectType.PERSON), ("stop",)]

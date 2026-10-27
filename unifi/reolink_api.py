@@ -309,7 +309,9 @@ class ReolinkApi:
             if attempt == 0 and code in STALE_TOKEN_CODES:
                 self._token = None
                 continue
-            raise RuntimeError(f"Reolink snapshot failed: status {status}, {raw[:120]!r}")
+            raise RuntimeError(
+                f"Reolink snapshot failed: status {status}, {raw[:120]!r}"
+            )
         raise RuntimeError("unreachable")
 
     async def logout(self) -> None:

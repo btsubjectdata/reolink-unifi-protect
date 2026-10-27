@@ -50,19 +50,52 @@ class FakeSecureCamera:
             ha2 = md5("POST:cgi-bin/api.cgi?cmd=Login")
             expect = md5(f"{ha1}:{NONCE}:00000002:{d['Cnonce']}:auth:{ha2}")
             if d["Response"] != expect:
-                return 200, {}, json.dumps([{"cmd": "Login", "code": 1, "error": {"rspCode": -7}}]).encode()
+                return (
+                    200,
+                    {},
+                    json.dumps(
+                        [{"cmd": "Login", "code": 1, "error": {"rspCode": -7}}]
+                    ).encode(),
+                )
             self.cipher = _Cipher(
                 md5(f"{NONCE}-{PASSWORD}-{d['Cnonce']}")[:16].upper(),
                 md5(f"webapp-{d['Cnonce']}-{PASSWORD}-{NONCE}-{USER}")[:16].upper(),
             )
             self.logins += 1
-            reply = [{"cmd": "Login", "code": 0, "value": {"Token": {"name": "tok1", "leaseTime": 3600, "checkBasic": 61, "countTotal": 32}}}]
+            reply = [
+                {
+                    "cmd": "Login",
+                    "code": 0,
+                    "value": {
+                        "Token": {
+                            "name": "tok1",
+                            "leaseTime": 3600,
+                            "checkBasic": 61,
+                            "countTotal": 32,
+                        }
+                    },
+                }
+            ]
             return 200, {}, self.cipher.encrypt(json.dumps(reply)).encode()
         assert q["token"] == ["tok1"]
         plain = parse_qs(self.cipher.decrypt(q["encrypt"][0]))
         slot, num = int(plain["countId"][0]), int(plain["checkNum"][0])
         if slot < 3 or num <= self.seen.get(slot, 61):
-            return 200, {}, self.cipher.encrypt(json.dumps([{"cmd": "x", "code": 1, "error": {"rspCode": -104, "detail": "err check num"}}])).encode()
+            return (
+                200,
+                {},
+                self.cipher.encrypt(
+                    json.dumps(
+                        [
+                            {
+                                "cmd": "x",
+                                "code": 1,
+                                "error": {"rspCode": -104, "detail": "err check num"},
+                            }
+                        ]
+                    )
+                ).encode(),
+            )
         self.seen[slot] = num
         if plain.get("cmd") == ["Snap"]:
             assert plain["snapType"] == ["sub"] and data is None
@@ -79,12 +112,34 @@ class FakePlainCamera:
         if q.get("cmd") == ["Login"]:
             body = json.loads(data)[0]
             if "User" not in body["param"]:
-                return 200, {}, json.dumps([{"cmd": "Login", "code": 1, "error": {"rspCode": -9}}]).encode()
+                return (
+                    200,
+                    {},
+                    json.dumps(
+                        [{"cmd": "Login", "code": 1, "error": {"rspCode": -9}}]
+                    ).encode(),
+                )
             assert body["param"]["User"]["password"] == PASSWORD
-            return 200, {}, json.dumps([{"cmd": "Login", "code": 0, "value": {"Token": {"name": "plaintok"}}}]).encode()
+            return (
+                200,
+                {},
+                json.dumps(
+                    [
+                        {
+                            "cmd": "Login",
+                            "code": 0,
+                            "value": {"Token": {"name": "plaintok"}},
+                        }
+                    ]
+                ).encode(),
+            )
         assert q["token"] == ["plaintok"] and "encrypt" not in q
         cmds = json.loads(data)
-        return 200, {}, json.dumps([{"cmd": c["cmd"], "code": 0} for c in cmds]).encode()
+        return (
+            200,
+            {},
+            json.dumps([{"cmd": c["cmd"], "code": 0} for c in cmds]).encode(),
+        )
 
 
 def make_api(fake) -> ReolinkApi:
@@ -94,8 +149,16 @@ def make_api(fake) -> ReolinkApi:
 
 
 def test_parse_www_authenticate():
-    f = parse_www_authenticate('Digest qop="auth", realm="IPC", nonce="abc", stale="FALSE", nc=00000002')
-    assert f == {"qop": "auth", "realm": "IPC", "nonce": "abc", "stale": "FALSE", "nc": "00000002"}
+    f = parse_www_authenticate(
+        'Digest qop="auth", realm="IPC", nonce="abc", stale="FALSE", nc=00000002'
+    )
+    assert f == {
+        "qop": "auth",
+        "realm": "IPC",
+        "nonce": "abc",
+        "stale": "FALSE",
+        "nc": "00000002",
+    }
 
 
 def test_cipher_roundtrip_zero_padding():
@@ -112,9 +175,17 @@ async def test_digest_login_encrypted_commands_and_snapshot():
     api = make_api(cam)
     res = await api.call_one("GetDevInfo")
     assert res["code"] == 0 and api.secure is True and cam.logins == 1
-    res = await api.call([{"cmd": "SetWhiteLed", "param": {"WhiteLed": {"state": 1}}}, {"cmd": "GetIsp", "param": {}}])
+    res = await api.call(
+        [
+            {"cmd": "SetWhiteLed", "param": {"WhiteLed": {"state": 1}}},
+            {"cmd": "GetIsp", "param": {}},
+        ]
+    )
     assert [r["code"] for r in res] == [0, 0]
-    assert cam.calls[-2:] == [("SetWhiteLed", {"WhiteLed": {"state": 1}}), ("GetIsp", {})]
+    assert cam.calls[-2:] == [
+        ("SetWhiteLed", {"WhiteLed": {"state": 1}}),
+        ("GetIsp", {}),
+    ]
     assert await api.snapshot("sub") == b"\xff\xd8jpeg"
     assert cam.logins == 1  # one session for everything
     # every request used a fresh, increasing check number on a non-stream slot
