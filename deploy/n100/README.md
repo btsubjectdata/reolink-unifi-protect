@@ -153,6 +153,19 @@ an already-adopted camera and never needs the Protect login again.
 | update code | `git pull && docker compose up -d --build` |
 | status in Protect | the camera shows the host's IP; "Click to Update" must **never** be clicked (it would push UniFi firmware at a Linux box) |
 
+## Clock overlay jumping back a second / jittery motion
+
+Seen on the Elite Floodlight over WiFi: the camera's frame timestamps arrive uneven and
+occasionally go backwards, so Protect shows a frame out of order. `FFMPEG_ARGS` in
+`.env.example` re-times the passthrough stream with ffmpeg's `setts` filter (no
+re-encode, no CPU cost). Check a camera with:
+
+```sh
+ffprobe -v error -rtsp_transport tcp -select_streams v:0 -read_intervals %+6 \
+  -show_entries packet=dts -of csv=p=0 "rtsp://user:pass@<cam>:554/h264Preview_01_main" \
+  | awk 'NR>1 && $1<=p {b++} {p=$1} END {print b+0, "backward/repeated timestamps"}'
+```
+
 ## After a Protect update
 
 1. Does the camera still show live view and events? If yes, done.
