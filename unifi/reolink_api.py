@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import random
+import time
 from typing import Any, Optional
 
 import aiohttp
@@ -39,6 +40,25 @@ from yarl import URL
 
 # rspCode values that mean "log in again"
 STALE_TOKEN_CODES = (-6, -7, -27, -502)
+
+
+def _is_stale(reply: dict) -> bool:
+    """A reply that means "log in again": known codes, or any token/login error.
+
+    The Elite Floodlight (v3.2.0.6011) answers an expired token with
+    ``"detail": "error token"`` and an rspCode none of the documented ones.
+    """
+    if reply.get("code") == 0:
+        return False
+    err = reply.get("error") or {}
+    detail = str(err.get("detail", "")).lower()
+    return (
+        err.get("rspCode") in STALE_TOKEN_CODES
+        or "token" in detail
+        or "login" in detail
+    )
+
+
 # ids 0-2 are used by the web UI for live view / playback / download and are not
 # ours to burn
 _FIRST_COMMAND_SLOT = 3
@@ -103,6 +123,7 @@ class ReolinkApi:
         self._lock = asyncio.Lock()
         self._cipher: Optional[_Cipher] = None
         self._counts: dict[int, int] = {}
+        self._token_expires = 0.0  # monotonic; renew before the camera's leaseTime
         self.secure: Optional[bool] = None  # unknown until the first login
 
     # -- transport -------------------------------------------------------------------
@@ -189,6 +210,7 @@ class ReolinkApi:
         if res[0].get("code") != 0:
             raise RuntimeError(f"Reolink login failed: {res[0].get('error')}")
         self._token = res[0]["value"]["Token"]["name"]
+        self._set_lease(res[0]["value"]["Token"].get("leaseTime"))
         self.secure = False
         self.logger.debug("Reolink %s: plain login", self.host)
 
@@ -233,11 +255,24 @@ class ReolinkApi:
             raise RuntimeError(f"Reolink digest login failed: {res[0].get('error')}")
         token = res[0]["value"]["Token"]
         self._token = token["name"]
+        self._set_lease(token.get("leaseTime"))
         basic = int(token.get("checkBasic", 0))
         total = int(token.get("countTotal", 32))
         self._counts = {i: basic for i in range(_FIRST_COMMAND_SLOT, max(total, 4))}
         self.secure = True
         self.logger.debug("Reolink %s: digest login, encrypted API", self.host)
+
+    def _set_lease(self, lease) -> None:
+        try:
+            seconds = float(lease)
+        except (TypeError, ValueError):
+            seconds = 3600.0
+        # renew a couple of minutes early so no request lands on a dead token
+        self._token_expires = time.monotonic() + max(seconds - 120.0, 60.0)
+
+    async def _ensure_token(self) -> None:
+        if self._token is None or time.monotonic() >= self._token_expires:
+            await self._login()
 
     # -- requests --------------------------------------------------------------------
 
@@ -262,8 +297,7 @@ class ReolinkApi:
     async def call(self, cmds: list[dict[str, Any]]) -> list:
         """Send one or more commands; logs in (again) as needed. Returns the reply list."""
         for attempt in (0, 1):
-            if self._token is None:
-                await self._login()
+            await self._ensure_token()
             body = json.dumps(
                 [{"action": 0, **c} for c in cmds]
             )  # action is required by the encrypted API
@@ -275,11 +309,7 @@ class ReolinkApi:
             name = cmds[0]["cmd"] if len(cmds) == 1 else None
             _, _, raw = await self._request("POST", self._query(name), data)
             res = self._decode(raw)
-            if attempt == 0 and any(
-                r.get("code") != 0
-                and r.get("error", {}).get("rspCode") in STALE_TOKEN_CODES
-                for r in res
-            ):
+            if attempt == 0 and any(_is_stale(r) for r in res):
                 self._token = None
                 continue
             return res
@@ -292,8 +322,7 @@ class ReolinkApi:
     async def snapshot(self, snap_type: str = "main") -> bytes:
         """A JPEG from the camera (``main``, ``sub`` or ``ext`` stream)."""
         for attempt in (0, 1):
-            if self._token is None:
-                await self._login()
+            await self._ensure_token()
             query = self._query("Snap", f"channel={self.channel}&snapType={snap_type}")
             if not self.secure:
                 query += "&rs=unificamproxy"
@@ -302,11 +331,10 @@ class ReolinkApi:
                 return raw
             # a JSON error instead of an image: usually an expired token
             try:
-                res = self._decode(raw)
-                code = res[0].get("error", {}).get("rspCode")
+                stale = _is_stale(self._decode(raw)[0])
             except Exception:  # noqa: BLE001
-                code = None
-            if attempt == 0 and code in STALE_TOKEN_CODES:
+                stale = False
+            if attempt == 0 and stale:
                 self._token = None
                 continue
             raise RuntimeError(

@@ -205,3 +205,25 @@ async def test_plain_login_fallback_for_older_firmware():
     api = make_api(FakePlainCamera())
     res = await api.call_one("GetDevInfo")
     assert res["code"] == 0 and api.secure is False
+
+
+def test_error_token_reply_counts_as_stale():
+    from unifi.reolink_api import _is_stale
+
+    assert _is_stale(
+        {"cmd": "Unknown", "code": 1, "error": {"detail": "error token", "rspCode": -9}}
+    )
+    assert _is_stale({"code": 1, "error": {"rspCode": -6}})
+    assert not _is_stale({"code": 1, "error": {"detail": "param error", "rspCode": -4}})
+    assert not _is_stale({"code": 0})
+
+
+@pytest.mark.asyncio
+async def test_token_is_renewed_before_the_lease_runs_out():
+    cam = FakeSecureCamera()
+    api = make_api(cam)
+    assert (await api.call_one("GetDevInfo"))["code"] == 0
+    assert cam.logins == 1
+    api._token_expires = 0.0  # lease ran out
+    assert (await api.call_one("GetDevInfo"))["code"] == 0
+    assert cam.logins == 2

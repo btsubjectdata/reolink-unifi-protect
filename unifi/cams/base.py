@@ -1005,7 +1005,11 @@ class UnifiCamBase(metaclass=ABCMeta):
 
     # Download filenames carry the short version, e.g.
     # .../e7fc-sav837gw-5.4.132-<uuid>.bin
-    FW_FILENAME_VERSION = re.compile(r"-(\d+\.\d+\.\d+)-[^/]*\.bin$")
+    FW_FILENAME_VERSION = re.compile(
+        # .../e7fc-sav837gw-5.4.132-<uuid>.bin, or (Protect 7.3, 2026-10)
+        # .../internal/update/sav837gw/uvc/firmware/5.5.43/<MAC>
+        r"-(\d+\.\d+\.\d+)-[^/]*\.bin$|/firmware/(\d+\.\d+\.\d+)(?:/|$)"
+    )
     # Legacy (pre-sysid) binaries carry a plaintext long-form version at
     # offset 4, e.g. UVC.S2L.v4.23.8.67.0eba6e3.200526.1046.
     FW_HEADER_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{5,49}")
@@ -1027,7 +1031,7 @@ class UnifiCamBase(metaclass=ABCMeta):
         version = None
         m = self.FW_FILENAME_VERSION.search(urllib.parse.urlparse(url).path)
         if m:
-            version = m.group(1)
+            version = m.group(1) or m.group(2)
         else:
             try:
                 raw = (await self._fetch_firmware_header(url))[4:54]

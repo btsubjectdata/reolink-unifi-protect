@@ -98,3 +98,11 @@ async def test_any_close_is_retried_not_fatal(cam, monkeypatch, exc):
     with pytest.raises(RetryableError):
         await cam._run(ClosingSocket(exc))
     await asyncio.sleep(0)  # let the watchdog stub finish
+
+
+async def test_version_taken_from_protect_internal_update_path(cam, monkeypatch):
+    # Protect 7.3 (2026-10) pushes its own mirror URL: no .bin filename at all.
+    monkeypatch.setattr(base.aiohttp, "ClientSession", NoNetwork)
+    uri = "https://192.168.1.1:7444/internal/update/sav837gw/uvc/firmware/5.5.43/AABBCC001311"
+    await cam.process_upgrade(upgrade_msg(uri))
+    assert cam.args.fw_version == "5.5.43"
