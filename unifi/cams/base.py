@@ -336,8 +336,13 @@ class UnifiCamBase(metaclass=ABCMeta):
                     f" -b:v {self.args.lo_transcode_bitrate}"
                     f" -g {lo_fps} -c:a copy"
                 )
+            # -bf 0: no B-frames / frame reordering. hevc_qsv reorders ~half of
+            # its frames by default; a real UniFi camera never does, and Protect
+            # plays them in decode order (moving objects slide back and forth,
+            # the clock overlay flips back a second). Measured: 60/120 reordered
+            # packets by default, 0 with -bf 0.
             return (
-                f"-c:v hevc_qsv -b:v {self.args.lo_transcode_bitrate}"
+                f"-c:v hevc_qsv -bf 0 -b:v {self.args.lo_transcode_bitrate}"
                 f" -g {lo_fps} -c:a copy"
             )
         # Post-input (encode) slot: scale + encode H.264, both on the iGPU.
@@ -353,7 +358,7 @@ class UnifiCamBase(metaclass=ABCMeta):
             return (
                 f'-vf "vpp_qsv=w={self.args.transcode_width}'
                 f':h={self.args.transcode_height}"'
-                f" -c:v h264_qsv -b:v {self.args.transcode_bitrate}"
+                f" -c:v h264_qsv -bf 0 -b:v {self.args.transcode_bitrate}"
                 " -ar 32000 -ac 1 -codec:a aac -b:a 32k"
             )
         return self.args.ffmpeg_args

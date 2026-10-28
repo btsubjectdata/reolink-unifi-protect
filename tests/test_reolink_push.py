@@ -239,3 +239,15 @@ async def test_push_hold_zero_ends_immediately(cam):
     await cam._apply_ai_states(states(people=True))
     await cam._apply_ai_states(states())
     assert cam.events == [("start", SmartDetectObjectType.PERSON), ("stop",)]
+
+
+def test_qsv_encoders_never_reorder_frames():
+    # Protect plays frames in decode order; B-frame reordering makes moving
+    # objects slide back and forth. Every Quick Sync encode must pass -bf 0.
+    import inspect
+
+    from unifi.cams import base
+
+    src = inspect.getsource(base.UnifiCamBase.get_extra_ffmpeg_args)
+    for enc in ("hevc_qsv", "h264_qsv"):
+        assert f"-c:v {enc} -bf 0" in src
